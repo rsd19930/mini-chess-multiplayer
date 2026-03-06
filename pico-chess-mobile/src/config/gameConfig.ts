@@ -27,5 +27,9 @@ export const gameConfig = {
         name: 'Picobot',
         botDifficultyDepth: 2,
         botMaxThinkTimeMs: 5000,
+    },
+    economyParams: {
+        matchFee: 100,
+        matchReward: 150
     }
 };

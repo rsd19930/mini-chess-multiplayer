@@ -27,7 +27,7 @@ export interface Drop {
 
 export type GameAction = Move | Drop;
 
-export type WinReason = 'Checkmate' | 'Stalemate' | 'Resignation' | 'Turn Skipped' | null;
+export type WinReason = 'Checkmate' | 'Stalemate' | 'Resignation' | 'Turn Skipped' | 'Timeout' | null;
 
 export interface GameState {
     board: (Piece | null)[][];

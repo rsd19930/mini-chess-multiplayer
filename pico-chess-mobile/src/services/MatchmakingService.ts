@@ -16,6 +16,7 @@ export const MatchmakingService = {
             .from('matches')
             .select('id, player_white')
             .eq('status', 'waiting')
+            .eq('is_private', false)
             .neq('player_white', userId)
             .gte('created_at', timeoutLimit)
             .limit(1);
@@ -59,6 +60,7 @@ export const MatchmakingService = {
                 .insert({
                     player_white: userId,
                     status: 'waiting',
+                    is_private: false,
                     game_state: initialState
                 })
                 .select()

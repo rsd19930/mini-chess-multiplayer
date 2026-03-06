@@ -18,9 +18,12 @@ interface ChessBoardProps {
     gameState: GameState;
     setGameState: (state: GameState) => void | Promise<void>;
     isInputDisabled?: boolean;
+    timeLeft?: number;
+    matchStatus?: string;
+    opponentName?: string;
 }
 
-export const ChessBoard: React.FC<ChessBoardProps> = ({ localColor, engine, gameState, setGameState, isInputDisabled = false }) => {
+export const ChessBoard: React.FC<ChessBoardProps> = ({ localColor, engine, gameState, setGameState, isInputDisabled = false, timeLeft, matchStatus, opponentName }) => {
     // Init audio
     useEffect(() => {
         AudioService.initialize().then(() => AudioService.playGameStart());
@@ -179,16 +182,37 @@ export const ChessBoard: React.FC<ChessBoardProps> = ({ localColor, engine, game
         return squares;
     };
 
+    const renderPlayerContainer = (color: PlayerColor, children: React.ReactNode, name: string) => {
+        const isActive = gameState.turn === color && matchStatus === 'active' && !gameState.isGameOver;
+        return (
+            <View style={[styles.playerContainer, isActive && styles.activePlayerContainer]}>
+                <View style={styles.playerHeader}>
+                    <Text style={[styles.playerName, isActive && styles.activePlayerText]}>{name}</Text>
+                    {isActive && timeLeft !== undefined && (
+                        <Text style={[styles.playerTimer, timeLeft <= 10 && styles.lowTime]}>
+                            ⏱ 00:{timeLeft < 10 ? `0${timeLeft}` : timeLeft}
+                        </Text>
+                    )}
+                </View>
+                {children}
+            </View>
+        );
+    };
+
     return (
         <View style={styles.container}>
             {/* Opponent Pocket (Top) */}
-            <Pocket
-                color={localColor === 'white' ? 'black' : 'white'}
-                pieces={gameState.pocket[localColor === 'white' ? 'black' : 'white']}
-                onSelectPiece={(type) => handlePocketSelect(localColor === 'white' ? 'black' : 'white', type)}
-                selectedPiece={gameState.turn !== localColor ? selectedPocketPiece : null}
-                size={40}
-            />
+            {renderPlayerContainer(
+                localColor === 'white' ? 'black' : 'white',
+                <Pocket
+                    color={localColor === 'white' ? 'black' : 'white'}
+                    pieces={gameState.pocket[localColor === 'white' ? 'black' : 'white']}
+                    onSelectPiece={(type) => handlePocketSelect(localColor === 'white' ? 'black' : 'white', type)}
+                    selectedPiece={gameState.turn !== localColor ? selectedPocketPiece : null}
+                    size={40}
+                />,
+                opponentName || 'Opponent'
+            )}
 
             {/* The 2.5D Board Container */}
             <View style={styles.board25DWrapper}>
@@ -219,13 +243,17 @@ export const ChessBoard: React.FC<ChessBoardProps> = ({ localColor, engine, game
             </View>
 
             {/* Local Player Pocket (Bottom) */}
-            <Pocket
-                color={localColor}
-                pieces={gameState.pocket[localColor]}
-                onSelectPiece={(type) => handlePocketSelect(localColor, type)}
-                selectedPiece={gameState.turn === localColor ? selectedPocketPiece : null}
-                size={50}
-            />
+            {renderPlayerContainer(
+                localColor,
+                <Pocket
+                    color={localColor}
+                    pieces={gameState.pocket[localColor]}
+                    onSelectPiece={(type) => handlePocketSelect(localColor, type)}
+                    selectedPiece={gameState.turn === localColor ? selectedPocketPiece : null}
+                    size={50}
+                />,
+                'You'
+            )}
         </View>
     );
 };
@@ -325,5 +353,42 @@ const styles = StyleSheet.create({
         borderRadius: 8,
         justifyContent: 'center',
         alignItems: 'center',
+    },
+    playerContainer: {
+        width: '100%',
+        padding: 8,
+        borderRadius: 16,
+        marginVertical: 4,
+    },
+    activePlayerContainer: {
+        backgroundColor: 'rgba(74, 222, 128, 0.15)',
+        borderColor: '#4ade80',
+        borderWidth: 2,
+    },
+    playerHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'flex-end',
+        paddingHorizontal: 8,
+        marginTop: 4,
+        marginBottom: -4,
+    },
+    playerName: {
+        color: '#A0A0A0',
+        fontSize: 14,
+        fontWeight: 'bold',
+        textTransform: 'uppercase',
+    },
+    activePlayerText: {
+        color: '#4ade80',
+    },
+    playerTimer: {
+        color: 'white',
+        fontSize: 16,
+        fontWeight: 'bold',
+        fontVariant: ['tabular-nums'],
+    },
+    lowTime: {
+        color: '#ef4444',
     }
 });

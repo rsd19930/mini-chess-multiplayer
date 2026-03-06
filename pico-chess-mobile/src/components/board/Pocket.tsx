@@ -46,14 +46,18 @@ export const Pocket: React.FC<PocketProps> = ({ color, pieces, onSelectPiece, se
 const styles = StyleSheet.create({
     pocketContainer: {
         flexDirection: 'row',
-        backgroundColor: defaultTheme.ui.pocketBackground,
+        flexWrap: 'wrap',
+        gap: 8,
+        backgroundColor: 'rgba(0, 0, 0, 0.2)',
         borderRadius: 12,
-        padding: 10,
+        padding: 12,
         marginVertical: 10,
         justifyContent: 'center',
         alignItems: 'center',
         width: '100%',
-        minHeight: 60,
+        minHeight: 80,
+        borderWidth: 1,
+        borderColor: 'rgba(255, 255, 255, 0.1)',
     },
     pocketSlot: {
         justifyContent: 'center',

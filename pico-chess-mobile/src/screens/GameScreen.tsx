@@ -26,8 +26,45 @@ export const GameScreen: React.FC<GameScreenProps> = ({ route, navigation }) => 
     const [engine] = useState(() => new GameEngine());
     const [gameState, setGameState] = useState<GameState>(engine.getState());
     const [matchStatus, setMatchStatus] = useState('active');
+    const [isPrivateMatch, setIsPrivateMatch] = useState(false);
     const [opponentId, setOpponentId] = useState<string | null>(null);
     const [isRematching, setIsRematching] = useState(false);
+    const [timeLeft, setTimeLeft] = useState(gameConfig.timers.turnTimeMs / 1000);
+
+    // Reset timer when turn changes
+    React.useEffect(() => {
+        setTimeLeft(gameConfig.timers.turnTimeMs / 1000);
+    }, [gameState.turn]);
+
+    // Timer logic
+    React.useEffect(() => {
+        if (matchStatus !== 'active' || gameState.isGameOver) return;
+
+        const timer = setInterval(() => {
+            setTimeLeft((prev) => {
+                if (prev <= 1) {
+                    clearInterval(timer);
+                    if (gameState.turn === localColor) {
+                        const newState = engine.resign(localColor);
+                        newState.winReason = 'Timeout';
+
+                        setGameState(newState);
+                        if (mode === 'online' && matchId) {
+                            supabase.from('matches').update({ game_state: newState }).eq('id', matchId);
+                        }
+                    } else if (mode === 'local') {
+                        const newState = engine.resign(gameState.turn);
+                        newState.winReason = 'Timeout';
+                        setGameState(newState);
+                    }
+                    return 0;
+                }
+                return prev - 1;
+            });
+        }, 1000);
+
+        return () => clearInterval(timer);
+    }, [matchStatus, gameState.isGameOver, gameState.turn, localColor, mode, engine, matchId]);
 
     // Effect to subscribe to the remote Match state
     React.useEffect(() => {
@@ -36,12 +73,13 @@ export const GameScreen: React.FC<GameScreenProps> = ({ route, navigation }) => 
         // Fetch initial status
         supabase
             .from('matches')
-            .select('status, player_white, player_black')
+            .select('status, player_white, player_black, is_private')
             .eq('id', matchId)
             .single()
             .then(({ data }) => {
                 if (data) {
                     setMatchStatus(data.status);
+                    setIsPrivateMatch(data.is_private);
                     const oppId = localColor === 'white' ? data.player_black : data.player_white;
                     setOpponentId(oppId);
                 }
@@ -83,7 +121,7 @@ export const GameScreen: React.FC<GameScreenProps> = ({ route, navigation }) => 
 
     // Bot Fallback Timer
     React.useEffect(() => {
-        if (mode !== 'online' || matchStatus !== 'waiting' || !matchId) return;
+        if (mode !== 'online' || matchStatus !== 'waiting' || !matchId || isPrivateMatch) return;
 
         const timer = setTimeout(async () => {
             const botUuid = '00000000-0000-0000-0000-000000000000';
@@ -100,7 +138,25 @@ export const GameScreen: React.FC<GameScreenProps> = ({ route, navigation }) => 
         }, gameConfig.timers.matchmakingTimeoutMs);
 
         return () => clearTimeout(timer);
-    }, [mode, matchStatus, matchId]);
+    }, [mode, matchStatus, matchId, isPrivateMatch]);
+
+    // Cleanup abandoned waiting matches on unmount
+    React.useEffect(() => {
+        return () => {
+            if (mode === 'online' && matchId) {
+                // If the user leaves the screen (unmounts) while the match is still waiting, abort it.
+                // The .eq('status', 'waiting') completely guards against aborting a match that already started active play.
+                supabase
+                    .from('matches')
+                    .update({ status: 'aborted' })
+                    .eq('id', matchId)
+                    .eq('status', 'waiting')
+                    .then(({ error }) => {
+                        if (error) console.error("Error aborting abandoned match:", error);
+                    });
+            }
+        };
+    }, [mode, matchId]);
 
     // Bot Turn Logic
     React.useEffect(() => {
@@ -151,10 +207,23 @@ export const GameScreen: React.FC<GameScreenProps> = ({ route, navigation }) => 
                         game_state: engine.getState()
                     })
                     .eq('id', matchId);
+
+                if (gameState.winner === localColor) {
+                    if (isPrivateMatch) {
+                        // Friendly matches do not yield economy rewards
+                        // Just show a simple notification
+                        Alert.alert('Victory!', `You won the match!`);
+                    } else {
+                        const { data } = await supabase.rpc('claim_victory_reward', { p_match_id: matchId });
+                        if (data?.success === true) {
+                            Alert.alert('Victory!', `You won ${data.reward} coins!`);
+                        }
+                    }
+                }
             }
         };
         syncGameOver();
-    }, [gameState.isGameOver, mode, matchId, gameState.winReason, engine]);
+    }, [gameState.isGameOver, mode, matchId, gameState.winReason, engine, gameState.winner, localColor]);
 
     const [resignModalVisible, setResignModalVisible] = useState(false);
 
@@ -225,6 +294,9 @@ export const GameScreen: React.FC<GameScreenProps> = ({ route, navigation }) => 
                     gameState={gameState}
                     setGameState={handleSetGameState}
                     isInputDisabled={mode === 'online' && (gameState.turn !== localColor || matchStatus === 'waiting')}
+                    timeLeft={timeLeft}
+                    matchStatus={matchStatus}
+                    opponentName={mode === 'local' ? 'Opponent' : (opponentId === '00000000-0000-0000-0000-000000000000' ? gameConfig.botParams.name : 'Opponent')}
                 />
 
                 <View style={styles.footer}>
