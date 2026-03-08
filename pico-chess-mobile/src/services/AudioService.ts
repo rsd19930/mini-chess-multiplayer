@@ -9,29 +9,48 @@ export class AudioService {
     private static gameEndSound: Audio.Sound | null = null;
     private static gameStartSound: Audio.Sound | null = null;
 
-    static async initialize() {
+    private static opponentMoveSound: Audio.Sound | null = null;
+    private static opponentCaptureSound: Audio.Sound | null = null;
+    private static opponentDropSound: Audio.Sound | null = null;
+
+    static async preloadSounds() {
         try {
             await Audio.setAudioModeAsync({
                 playsInSilentModeIOS: true,
             });
 
-            const [{ sound: move }, { sound: capture }, { sound: drop }, { sound: check }, { sound: checkmate }, { sound: gameEnd }, { sound: gameStart }] = await Promise.all([
+            const results = await Promise.allSettled([
                 Audio.Sound.createAsync(require('../../assets/sounds/move_step.wav')),
                 Audio.Sound.createAsync(require('../../assets/sounds/piece_capture.wav')),
                 Audio.Sound.createAsync(require('../../assets/sounds/piece_drop.wav')),
                 Audio.Sound.createAsync(require('../../assets/sounds/check.wav')),
                 Audio.Sound.createAsync(require('../../assets/sounds/checkmate.wav')),
                 Audio.Sound.createAsync(require('../../assets/sounds/game_end.wav')),
-                Audio.Sound.createAsync(require('../../assets/sounds/game_start.wav'))
+                Audio.Sound.createAsync(require('../../assets/sounds/game_start.wav')),
+                Audio.Sound.createAsync(require('../../assets/sounds/opponent_moves_piece.mp3')),
+                Audio.Sound.createAsync(require('../../assets/sounds/opponent_captures_piece.mp3')),
+                Audio.Sound.createAsync(require('../../assets/sounds/opponent_drops_piece_from_hand.mp3')),
             ]);
 
-            this.moveSound = move;
-            this.captureSound = capture;
-            this.dropSound = drop;
-            this.checkSound = check;
-            this.checkmateSound = checkmate;
-            this.gameEndSound = gameEnd;
-            this.gameStartSound = gameStart;
+            const getSound = (res: PromiseSettledResult<{ sound: Audio.Sound }>) => {
+                if (res.status === 'fulfilled') {
+                    return res.value.sound;
+                } else {
+                    console.warn('Audio failed to load:', res.reason);
+                    return null;
+                }
+            };
+
+            this.moveSound = getSound(results[0]);
+            this.captureSound = getSound(results[1]);
+            this.dropSound = getSound(results[2]);
+            this.checkSound = getSound(results[3]);
+            this.checkmateSound = getSound(results[4]);
+            this.gameEndSound = getSound(results[5]);
+            this.gameStartSound = getSound(results[6]);
+            this.opponentMoveSound = getSound(results[7]);
+            this.opponentCaptureSound = getSound(results[8]);
+            this.opponentDropSound = getSound(results[9]);
 
         } catch (err) {
             console.warn('Audio assets not found, using silent stub', err);
@@ -74,5 +93,17 @@ export class AudioService {
 
     static async playGameStart() {
         await this.replaySafe(this.gameStartSound);
+    }
+
+    static async playOpponentMove() {
+        await this.replaySafe(this.opponentMoveSound);
+    }
+
+    static async playOpponentCapture() {
+        await this.replaySafe(this.opponentCaptureSound);
+    }
+
+    static async playOpponentDrop() {
+        await this.replaySafe(this.opponentDropSound);
     }
 }

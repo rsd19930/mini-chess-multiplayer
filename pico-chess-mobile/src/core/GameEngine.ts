@@ -53,6 +53,7 @@ export class GameEngine {
             winner: null,
             winReason: null,
             inCheck: false,
+            last_move_timestamp: Date.now(),
         };
     }
 
@@ -161,6 +162,9 @@ export class GameEngine {
             this.checkGameEndLogic(nextState);
         }
 
+        if (!nextState.pendingPromotion) {
+            nextState.last_move_timestamp = Date.now();
+        }
         this.state = nextState;
 
         return this.getState();
@@ -201,6 +205,7 @@ export class GameEngine {
         nextState.inCheck = this.isKingInCheck(nextState, nextState.turn);
         this.checkGameEndLogic(nextState);
 
+        nextState.last_move_timestamp = Date.now();
         this.state = nextState;
         return this.getState();
     }
@@ -260,11 +265,11 @@ export class GameEngine {
         }
     }
 
-    public resign(color: PlayerColor): GameState {
+    public resign(color: PlayerColor, reason: string = 'Resignation'): GameState {
         const nextState = this.cloneState(this.state);
         nextState.isGameOver = true;
         nextState.winner = color === 'white' ? 'black' : 'white';
-        nextState.winReason = 'Resignation';
+        nextState.winReason = reason as any;
         this.state = nextState;
         return this.getState();
     }

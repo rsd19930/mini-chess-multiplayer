@@ -55,61 +55,66 @@ export async function registerForPushNotificationsAsync(): Promise<string | unde
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export async function scheduleDailyReminders(isLoggedIn: boolean, economyConfig: any, lastLoginBonusIsoString?: string | null) {
-    await Notifications.cancelAllScheduledNotificationsAsync();
+    try {
+        await Notifications.cancelAllScheduledNotificationsAsync();
 
-    const hasSignedInBeforeString = await AsyncStorage.getItem('hasSignedInBefore');
-    const hasSignedInBefore = hasSignedInBeforeString === 'true';
+        const hasSignedInBeforeString = await AsyncStorage.getItem('hasSignedInBefore');
+        const hasSignedInBefore = hasSignedInBeforeString === 'true';
 
-    if (isLoggedIn && !hasSignedInBefore) {
-        await AsyncStorage.setItem('hasSignedInBefore', 'true');
-    }
+        if (isLoggedIn && !hasSignedInBefore) {
+            await AsyncStorage.setItem('hasSignedInBefore', 'true');
+        }
 
-    let title = '';
-    let body = '';
-    let isBrandNewUser = !isLoggedIn && !hasSignedInBefore;
+        let title = '';
+        let body = '';
+        let isBrandNewUser = !isLoggedIn && !hasSignedInBefore;
 
-    if (isBrandNewUser) {
-        title = `Claim your ${economyConfig?.new_user_bonus || 1000} Coin Bonus! 🎁`;
-        body = "Sign up today to get your new user bonus and start playing.";
-    } else {
-        title = "Your Daily Coins are Ready! 🪙";
-        body = `Claim your daily login bonus of ${economyConfig?.daily_login_bonus || 500} coins now.`;
-    }
+        if (isBrandNewUser) {
+            title = `Claim your ${economyConfig?.new_user_bonus || 1000} Coin Bonus! 🎁`;
+            body = "Sign up today to get your new user bonus and start playing.";
+        } else {
+            title = "Your Daily Coins are Ready! 🪙";
+            body = `Claim your daily login bonus of ${economyConfig?.daily_login_bonus || 500} coins now.`;
+        }
 
-    if (isBrandNewUser) {
-        // Scenario A: Brand new user, just repeat daily at 9 PM
-        await Notifications.scheduleNotificationAsync({
-            content: { title, body },
-            trigger: {
-                hour: 21,
-                minute: 0,
-                repeats: true
-            } as unknown as Notifications.DailyTriggerInput,
-        });
-    } else {
-        // Scenario B: Existing user, 14-day rolling schedule to skip days already claimed
-        const now = new Date();
-        const lastClaimed = lastLoginBonusIsoString ? new Date(lastLoginBonusIsoString) : new Date(0);
-        const hasClaimedToday = lastClaimed.toDateString() === now.toDateString();
-
-        for (let i = 0; i < 14; i++) {
-            const triggerDate = new Date();
-            triggerDate.setDate(triggerDate.getDate() + i);
-            triggerDate.setHours(21, 0, 0, 0);
-
-            if (i === 0) {
-                // Skip scheduling for today if they already claimed it, or if it's already past 9 PM
-                if (hasClaimedToday || triggerDate.getTime() <= now.getTime()) {
-                    continue;
-                }
-            }
-
+        if (isBrandNewUser) {
+            // Scenario A: Brand new user, just repeat daily at 9 PM
             await Notifications.scheduleNotificationAsync({
                 content: { title, body },
                 trigger: {
-                    date: triggerDate,
-                } as Notifications.DateTriggerInput,
+                    hour: 21,
+                    minute: 0,
+                    repeats: true
+                } as any
             });
+        } else {
+            // Scenario B: Existing user, 14-day rolling schedule to skip days already claimed
+            const now = new Date();
+            const lastClaimed = lastLoginBonusIsoString ? new Date(lastLoginBonusIsoString) : new Date(0);
+            const hasClaimedToday = lastClaimed.toDateString() === now.toDateString();
+
+            for (let i = 0; i < 14; i++) {
+                const triggerDate = new Date();
+                triggerDate.setDate(triggerDate.getDate() + i);
+                triggerDate.setHours(21, 0, 0, 0);
+
+                // Skip scheduling if it's already past 9 PM for this specific day
+                if (triggerDate.getTime() <= now.getTime()) {
+                    continue;
+                }
+
+                // If it's today and they already claimed, skip it
+                if (i === 0 && hasClaimedToday) {
+                    continue;
+                }
+
+                await Notifications.scheduleNotificationAsync({
+                    content: { title, body },
+                    trigger: { date: triggerDate } as any
+                });
+            }
         }
+    } catch (e: any) {
+        console.error('Error scheduling daily reminders:', e);
     }
 }

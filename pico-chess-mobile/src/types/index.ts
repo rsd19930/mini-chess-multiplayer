@@ -42,4 +42,5 @@ export interface GameState {
     winReason?: WinReason;
     inCheck: boolean;
     pendingPromotion?: boolean;
+    last_move_timestamp?: number;
 }

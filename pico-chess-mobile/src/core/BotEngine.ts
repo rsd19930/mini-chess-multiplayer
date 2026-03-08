@@ -136,7 +136,21 @@ export async function calculateBotAction(currentEngine: GameEngine, botColor: Pl
     // Return a random action from the best ones to add slight variance
     if (bestActions.length > 0) {
         const randomIndex = Math.floor(Math.random() * bestActions.length);
-        return bestActions[randomIndex];
+        const bestAction = bestActions[randomIndex];
+
+        // Intercept Pawn Promotion for Bot (No Queens)
+        if (bestAction.type === 'move') {
+            const piece = currentEngine.getState().board[bestAction.from.row][bestAction.from.col];
+            if (piece && piece.type === 'P') {
+                const promotionRank = piece.color === 'white' ? 0 : 5;
+                if (bestAction.to.row === promotionRank) {
+                    const promotionChoices: PieceType[] = ['R', 'B', 'N'];
+                    bestAction.promotion = promotionChoices[Math.floor(Math.random() * promotionChoices.length)];
+                }
+            }
+        }
+
+        return bestAction;
     }
 
     return null;

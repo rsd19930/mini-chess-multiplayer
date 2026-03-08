@@ -8,7 +8,12 @@
     "ios": "expo start --ios",
     "web": "expo start --web"
   },
+  "overrides": {
+    "react": "19.1.0",
+    "react-dom": "19.1.0"
+  },
   "dependencies": {
+    "@expo-google-fonts/public-sans": "^0.4.2",
     "@react-native-async-storage/async-storage": "^2.2.0",
     "@react-native-google-signin/google-signin": "^16.1.1",
     "@react-navigation/native": "^7.1.28",
@@ -21,6 +26,9 @@
     "expo-av": "~16.0.8",
     "expo-constants": "~18.0.13",
     "expo-device": "~8.0.10",
+    "expo-font": "~14.0.11",
+    "expo-keep-awake": "~15.0.8",
+    "expo-linear-gradient": "~15.0.8",
     "expo-notifications": "~0.32.16",
     "expo-status-bar": "~3.0.9",
     "expo-web-browser": "~15.0.10",

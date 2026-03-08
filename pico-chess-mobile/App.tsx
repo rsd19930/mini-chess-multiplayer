@@ -8,6 +8,7 @@ import { HomeScreen } from './src/screens/HomeScreen';
 import { GameScreen } from './src/screens/GameScreen';
 import { RootStackParamList } from './src/types/navigation';
 import * as Notifications from 'expo-notifications';
+import { useFonts, PublicSans_400Regular, PublicSans_700Bold, PublicSans_900Black } from '@expo-google-fonts/public-sans';
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -24,6 +25,12 @@ const Stack = createNativeStackNavigator<RootStackParamList>();
 const prefix = Linking.createURL('/');
 
 export default function App() {
+  const [fontsLoaded] = useFonts({
+    PublicSans_400Regular,
+    PublicSans_700Bold,
+    PublicSans_900Black,
+  });
+
   const linking = {
     prefixes: [prefix, 'picochess://'],
     config: {
@@ -82,6 +89,10 @@ export default function App() {
       return url;
     }
   };
+
+  if (!fontsLoaded) {
+    return null;
+  }
 
   return (
     <NavigationContainer linking={linking}>

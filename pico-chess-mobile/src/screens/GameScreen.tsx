@@ -1,485 +1,864 @@
-import React, { useState } from 'react';
-import { View, StyleSheet, Text, Button, Modal, TouchableOpacity, Alert } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ChessBoard } from '../components/board/ChessBoard';
-import { defaultTheme } from '../config/themeConfig';
-import { GameEngine } from '../core/GameEngine';
-import { GameState } from '../types';
-import { AudioService } from '../services/AudioService';
-import { calculateBotAction } from '../core/BotEngine';
-import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { RootStackParamList } from '../types/navigation';
-import { supabase } from '../services/supabase';
-import { gameConfig } from '../config/gameConfig';
-import { MatchmakingService } from '../services/MatchmakingService';
+import React, { useState } from "react";
+import {
+  View,
+  StyleSheet,
+  Text,
+  Button,
+  Modal,
+  TouchableOpacity,
+  Alert,
+  AppState,
+} from "react-native";
+import { useKeepAwake } from "expo-keep-awake";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { ChessBoard } from "../components/board/ChessBoard";
+import { defaultTheme } from "../config/themeConfig";
+import { GameEngine } from "../core/GameEngine";
+import { GameState } from "../types";
+import { AudioService } from "../services/AudioService";
+import { calculateBotAction } from "../core/BotEngine";
+import { NativeStackScreenProps } from "@react-navigation/native-stack";
+import { RootStackParamList } from "../types/navigation";
+import { supabase } from "../services/supabase";
+import { gameConfig } from "../config/gameConfig";
+import { MatchmakingService } from "../services/MatchmakingService";
 
-type GameScreenProps = NativeStackScreenProps<RootStackParamList, 'Game'>;
+type GameScreenProps = NativeStackScreenProps<RootStackParamList, "Game">;
 
-export const GameScreen: React.FC<GameScreenProps> = ({ route, navigation }) => {
-    const insets = useSafeAreaInsets();
+export const GameScreen: React.FC<GameScreenProps> = ({
+  route,
+  navigation,
+}) => {
+  useKeepAwake(); // Prevent screen dimming during gameplay!
 
-    // Retrieve the passed gamemode (local vs online)
-    const { mode, matchId, localColor } = route.params;
+  const insets = useSafeAreaInsets();
 
-    // In a real Match flow, we'd pass the local socket/realtime connection 
-    // and the mapped color down. For testing our UI, we'll assume we are White locally.
-    const [engine] = useState(() => new GameEngine());
-    const [gameState, setGameState] = useState<GameState>(engine.getState());
-    const [matchStatus, setMatchStatus] = useState('active');
-    const [isPrivateMatch, setIsPrivateMatch] = useState(false);
-    const [opponentId, setOpponentId] = useState<string | null>(null);
-    const [isRematching, setIsRematching] = useState(false);
-    const [timeLeft, setTimeLeft] = useState(gameConfig.timers.turnTimeMs / 1000);
+  // Retrieve the passed gamemode (local vs online)
+  const { mode, matchId, localColor } = route.params;
 
-    // Reset timer when turn changes
-    React.useEffect(() => {
-        setTimeLeft(gameConfig.timers.turnTimeMs / 1000);
-    }, [gameState.turn]);
+  // In a real Match flow, we'd pass the local socket/realtime connection
+  // and the mapped color down. For testing our UI, we'll assume we are White locally.
+  const [engine] = useState(() => new GameEngine());
+  const [gameState, setGameState] = useState<GameState>(engine.getState());
+  const [matchStatus, setMatchStatus] = useState("active");
+  const [isPrivateMatch, setIsPrivateMatch] = useState(false);
+  const [opponentId, setOpponentId] = useState<string | null>(null);
+  const [isRematching, setIsRematching] = useState(false);
+  const [timeLeft, setTimeLeft] = useState(gameConfig.timers.turnTimeMs / 1000);
+  const [matchStartedAt, setMatchStartedAt] = useState<string | null>(null);
+  const [localMatchStartTime, setLocalMatchStartTime] = useState<number | null>(
+    null,
+  );
+  const [customAlert, setCustomAlert] = useState<{
+    title: string;
+    message: string;
+    buttonText?: string;
+  } | null>(null);
+  const [matchmakingCountdown, setMatchmakingCountdown] = useState(
+    gameConfig.timers.matchmakingTimeoutMs / 1000,
+  );
 
-    // Timer logic
-    React.useEffect(() => {
-        if (matchStatus !== 'active' || gameState.isGameOver) return;
+  // Timer logic based on absolute last_move_timestamp
+  React.useEffect(() => {
+    if (matchStatus !== "active" || gameState.isGameOver) return;
 
-        const timer = setInterval(() => {
-            setTimeLeft((prev) => {
-                if (prev <= 1) {
-                    clearInterval(timer);
-                    if (gameState.turn === localColor) {
-                        const newState = engine.resign(localColor);
-                        newState.winReason = 'Timeout';
+    const updateTimer = () => {
+      if (matchStatus !== "active" || gameState.isGameOver) return;
 
-                        setGameState(newState);
-                        if (mode === 'online' && matchId) {
-                            supabase.from('matches').update({ game_state: newState }).eq('id', matchId);
-                        }
-                    } else if (mode === 'local') {
-                        const newState = engine.resign(gameState.turn);
-                        newState.winReason = 'Timeout';
-                        setGameState(newState);
-                    }
-                    return 0;
-                }
-                return prev - 1;
-            });
-        }, 1000);
+      const now = Date.now();
+      let lastMove = now;
 
-        return () => clearInterval(timer);
-    }, [matchStatus, gameState.isGameOver, gameState.turn, localColor, mode, engine, matchId]);
+      if (gameState.moveHistory.length === 0) {
+        if (!localMatchStartTime && !matchStartedAt) return;
+        // First turn: anchor to local time to prevent clock skew, then fallback to match started_at
+        lastMove = localMatchStartTime || new Date(matchStartedAt!).getTime();
+      } else if (gameState.last_move_timestamp) {
+        // Subsequent turns: anchor to last physical move
+        lastMove = gameState.last_move_timestamp;
+      }
 
-    // Effect to subscribe to the remote Match state
-    React.useEffect(() => {
-        if (mode !== 'online' || !matchId) return;
+      const elapsed = now - lastMove;
+      const remaining = Math.max(0, gameConfig.timers.turnTimeMs - elapsed);
 
-        // Fetch initial status
+      setTimeLeft(Math.ceil(remaining / 1000));
+
+      if (remaining <= 0) {
+        // Time's up!
+        if (gameState.turn === localColor) {
+          // Local player timed out
+          const newState = engine.resign(localColor, "Timeout");
+          setGameState(newState);
+          if (mode === "online" && matchId) {
+            supabase
+              .from("matches")
+              .update({ game_state: newState })
+              .eq("id", matchId);
+          }
+        } else if (mode === "online" && matchId) {
+          // Opponent timed out (we actively claim victory)
+          const newState = engine.resign(gameState.turn, "Timeout");
+          setGameState(newState);
+          supabase
+            .from("matches")
+            .update({ game_state: newState })
+            .eq("id", matchId);
+        } else if (mode === "local") {
+          // Local mode timeout
+          const newState = engine.resign(gameState.turn, "Timeout");
+          setGameState(newState);
+        }
+      }
+    };
+
+    updateTimer();
+    const timer = setInterval(updateTimer, 1000);
+
+    const subscription = AppState.addEventListener("change", (nextAppState) => {
+      if (nextAppState === "active") {
+        updateTimer();
+      }
+    });
+
+    return () => {
+      clearInterval(timer);
+      subscription.remove();
+    };
+  }, [
+    matchStatus,
+    gameState.isGameOver,
+    gameState.turn,
+    localColor,
+    mode,
+    engine,
+    matchId,
+    gameState.last_move_timestamp,
+    localMatchStartTime,
+    matchStartedAt,
+  ]);
+
+  // Effect to subscribe to the remote Match state
+  React.useEffect(() => {
+    if (mode !== "online" || !matchId) return;
+
+    // Fetch initial status
+    supabase
+      .from("matches")
+      .select("status, player_white, player_black, is_private, started_at")
+      .eq("id", matchId)
+      .single()
+      .then(({ data }) => {
+        if (data) {
+          setMatchStatus(data.status);
+          if (data.status === "active") setLocalMatchStartTime(Date.now());
+          setIsPrivateMatch(data.is_private);
+          setMatchStartedAt(data.started_at);
+          const oppId =
+            localColor === "white" ? data.player_black : data.player_white;
+          setOpponentId(oppId);
+        }
+      });
+
+    const channel = supabase
+      .channel(`match_${matchId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "matches",
+          filter: `id=eq.${matchId}`,
+        },
+        (payload) => {
+          if (payload.new && payload.new.status) {
+            setMatchStatus(payload.new.status);
+            if (payload.new.status === "active")
+              setLocalMatchStartTime(Date.now());
+          }
+          if (payload.new && payload.new.started_at) {
+            setMatchStartedAt(payload.new.started_at);
+          }
+          if (
+            payload.new &&
+            (payload.new.player_white || payload.new.player_black)
+          ) {
+            const oppId =
+              localColor === "white"
+                ? payload.new.player_black
+                : payload.new.player_white;
+            if (oppId) setOpponentId(oppId);
+          }
+          if (payload.new && payload.new.game_state) {
+            const remoteState = payload.new.game_state as GameState;
+            if (!remoteState.isGameOver) {
+              remoteState.last_move_timestamp = Date.now();
+            }
+
+            setGameState(remoteState);
+
+            engine.setState(remoteState);
+          }
+        },
+      )
+      .subscribe((status) => {
+        console.log("Realtime Subscription Status:", status);
+      });
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [mode, matchId, engine]);
+
+  // Bot Fallback Timer
+  React.useEffect(() => {
+    if (
+      mode !== "online" ||
+      matchStatus !== "waiting" ||
+      !matchId ||
+      isPrivateMatch
+    )
+      return;
+
+    const timer = setTimeout(async () => {
+      const botUuid = "00000000-0000-0000-0000-000000000000";
+      const nowIso = new Date().toISOString();
+      setOpponentId(botUuid);
+      setMatchStatus("active");
+      setMatchStartedAt(nowIso);
+      setLocalMatchStartTime(Date.now());
+      await supabase
+        .from("matches")
+        .update({
+          player_black: botUuid,
+          status: "active",
+          started_at: nowIso,
+        })
+        .eq("id", matchId);
+    }, gameConfig.timers.matchmakingTimeoutMs);
+
+    return () => clearTimeout(timer);
+  }, [mode, matchStatus, matchId, isPrivateMatch]);
+
+  // Matchmaking Active Countdown UI Timer
+  React.useEffect(() => {
+    if (mode !== "online" || matchStatus !== "waiting") return;
+
+    const interval = setInterval(() => {
+      setMatchmakingCountdown((prev) => Math.max(0, prev - 1));
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [mode, matchStatus]);
+
+  // Cleanup abandoned waiting matches on unmount
+  React.useEffect(() => {
+    return () => {
+      if (mode === "online" && matchId) {
+        // If the user leaves the screen (unmounts) while the match is still waiting, abort it.
+        // The .eq('status', 'waiting') completely guards against aborting a match that already started active play.
         supabase
-            .from('matches')
-            .select('status, player_white, player_black, is_private')
-            .eq('id', matchId)
-            .single()
-            .then(({ data }) => {
-                if (data) {
-                    setMatchStatus(data.status);
-                    setIsPrivateMatch(data.is_private);
-                    const oppId = localColor === 'white' ? data.player_black : data.player_white;
-                    setOpponentId(oppId);
-                }
-            });
-
-        const channel = supabase
-            .channel(`match_${matchId}`)
-            .on(
-                'postgres_changes',
-                {
-                    event: 'UPDATE',
-                    schema: 'public',
-                    table: 'matches',
-                    filter: `id=eq.${matchId}`,
-                },
-                (payload) => {
-                    if (payload.new && payload.new.status) {
-                        setMatchStatus(payload.new.status);
-                    }
-                    if (payload.new && (payload.new.player_white || payload.new.player_black)) {
-                        const oppId = localColor === 'white' ? payload.new.player_black : payload.new.player_white;
-                        if (oppId) setOpponentId(oppId);
-                    }
-                    if (payload.new && payload.new.game_state) {
-                        const remoteState = payload.new.game_state as GameState;
-                        engine.setState(remoteState);
-                        setGameState(remoteState);
-                    }
-                }
-            )
-            .subscribe((status) => {
-                console.log('Realtime Subscription Status:', status);
-            });
-
-        return () => {
-            supabase.removeChannel(channel);
-        };
-    }, [mode, matchId, engine]);
-
-    // Bot Fallback Timer
-    React.useEffect(() => {
-        if (mode !== 'online' || matchStatus !== 'waiting' || !matchId || isPrivateMatch) return;
-
-        const timer = setTimeout(async () => {
-            const botUuid = '00000000-0000-0000-0000-000000000000';
-            setOpponentId(botUuid);
-            setMatchStatus('active');
-            await supabase
-                .from('matches')
-                .update({
-                    player_black: botUuid,
-                    status: 'active',
-                    started_at: new Date().toISOString()
-                })
-                .eq('id', matchId);
-        }, gameConfig.timers.matchmakingTimeoutMs);
-
-        return () => clearTimeout(timer);
-    }, [mode, matchStatus, matchId, isPrivateMatch]);
-
-    // Cleanup abandoned waiting matches on unmount
-    React.useEffect(() => {
-        return () => {
-            if (mode === 'online' && matchId) {
-                // If the user leaves the screen (unmounts) while the match is still waiting, abort it.
-                // The .eq('status', 'waiting') completely guards against aborting a match that already started active play.
-                supabase
-                    .from('matches')
-                    .update({ status: 'aborted' })
-                    .eq('id', matchId)
-                    .eq('status', 'waiting')
-                    .then(({ error }) => {
-                        if (error) console.error("Error aborting abandoned match:", error);
-                    });
-            }
-        };
-    }, [mode, matchId]);
-
-    // Bot Turn Logic
-    React.useEffect(() => {
-        console.log('🤖 Bot Check -> status:', matchStatus, '| opponent:', opponentId, '| turn:', gameState.turn);
-        if (
-            mode === 'online' &&
-            matchStatus === 'active' &&
-            opponentId === '00000000-0000-0000-0000-000000000000' &&
-            gameState.turn !== localColor &&
-            !gameState.isGameOver
-        ) {
-            const timer = setTimeout(async () => {
-                const action = await calculateBotAction(engine, gameState.turn);
-                if (action) {
-                    engine.applyAction(action);
-                    setGameState({ ...engine.getState() });
-                    await supabase
-                        .from('matches')
-                        .update({ game_state: engine.getState() })
-                        .eq('id', matchId);
-                }
-            }, 1000);
-
-            return () => clearTimeout(timer);
-        }
-    }, [mode, matchStatus, opponentId, gameState.turn, gameState.isGameOver, localColor, matchId]);
-
-    // Override setGameState to ALSO push to Supabase if local player moved
-    const handleSetGameState = async (newState: GameState) => {
-        setGameState(newState);
-        if (mode === 'online' && matchId) {
-            await supabase
-                .from('matches')
-                .update({ game_state: newState })
-                .eq('id', matchId);
-        }
+          .from("matches")
+          .update({ status: "aborted" })
+          .eq("id", matchId)
+          .eq("status", "waiting")
+          .then(({ error }) => {
+            if (error) console.error("Error aborting abandoned match:", error);
+          });
+      }
     };
+  }, [mode, matchId]);
 
-    // Game Over DB Sync
-    React.useEffect(() => {
-        const syncGameOver = async () => {
-            if (gameState.isGameOver && mode === 'online' && matchId) {
-                const status = gameState.winReason === 'Resignation' ? 'aborted' : 'completed';
-                await supabase
-                    .from('matches')
-                    .update({
-                        status,
-                        game_state: engine.getState()
-                    })
-                    .eq('id', matchId);
-
-                if (gameState.winner === localColor) {
-                    if (isPrivateMatch) {
-                        // Friendly matches do not yield economy rewards
-                        // Just show a simple notification
-                        Alert.alert('Victory!', `You won the match!`);
-                    } else {
-                        const { data } = await supabase.rpc('claim_victory_reward', { p_match_id: matchId });
-                        if (data?.success === true) {
-                            Alert.alert('Victory!', `You won ${data.reward} coins!`);
-                        }
-                    }
-                }
-            }
-        };
-        syncGameOver();
-    }, [gameState.isGameOver, mode, matchId, gameState.winReason, engine, gameState.winner, localColor]);
-
-    const [resignModalVisible, setResignModalVisible] = useState(false);
-
-    const handleResign = () => {
-        setResignModalVisible(true);
-    };
-
-    const confirmResign = () => {
-        setGameState(engine.resign('white')); // Assuming hardcoded white for local test
-        setResignModalVisible(false);
-        AudioService.playGameEnd();
-    };
-
-    const handleRestart = async () => {
-        if (mode === 'local') {
-            setGameState(engine.resetState());
-            AudioService.playGameStart();
-        } else {
-            setIsRematching(true);
-            const { data: { session } } = await supabase.auth.getSession();
-            if (session) {
-                try {
-                    const result = await MatchmakingService.findOrCreateMatch(session.user.id);
-                    setIsRematching(false);
-                    navigation.replace('Game', {
-                        mode: 'online',
-                        matchId: result.matchId,
-                        localColor: result.color
-                    });
-                } catch (error: any) {
-                    setIsRematching(false);
-                    Alert.alert('Matchmaking Error', error.message || 'Failed to find a match.');
-                    navigation.navigate('Home');
-                }
-            } else {
-                setIsRematching(false);
-                navigation.navigate('Home');
-            }
-        }
-    };
-
-    const handleBackToHome = () => {
-        navigation.navigate('Home');
-    };
-
-    return (
-        <View style={styles.container}>
-            <View style={styles.contentWrapper}>
-                <View style={[styles.header, { paddingTop: Math.max(insets.top, 10) }]}>
-                    <Text style={styles.headerText}>
-                        Pico Chess ({mode === 'local' ? 'Local Test' : 'Online Match'})
-                    </Text>
-                </View>
-
-                {/* Waiting Overlay */}
-                {mode === 'online' && matchStatus === 'waiting' && (
-                    <View style={styles.waitingOverlay} pointerEvents="none">
-                        <View style={styles.waitingContent}>
-                            <Text style={styles.waitingText}>Waiting for opponent to join...</Text>
-                        </View>
-                    </View>
-                )}
-
-                {/* The Star of the Show: The 2.5D Board */}
-                <ChessBoard
-                    localColor={mode === 'online' ? (localColor || 'white') : 'white'}
-                    engine={engine}
-                    gameState={gameState}
-                    setGameState={handleSetGameState}
-                    isInputDisabled={mode === 'online' && (gameState.turn !== localColor || matchStatus === 'waiting')}
-                    timeLeft={timeLeft}
-                    matchStatus={matchStatus}
-                    opponentName={mode === 'local' ? 'Opponent' : (opponentId === '00000000-0000-0000-0000-000000000000' ? gameConfig.botParams.name : 'Opponent')}
-                />
-
-                <View style={styles.footer}>
-                    <Button title="RESIGN" color="red" onPress={handleResign} disabled={gameState.isGameOver} />
-                </View>
-
-                {/* Resign Confirmation Modal */}
-                <Modal visible={resignModalVisible} transparent={true} animationType="fade">
-                    <View style={styles.modalOverlay}>
-                        <View style={styles.modalContent}>
-                            <Text style={styles.modalTitle}>Resign Game</Text>
-                            <Text style={styles.modalText}>Are you sure you want to resign?</Text>
-                            <View style={styles.modalButtons}>
-                                <Button title="Cancel" onPress={() => setResignModalVisible(false)} />
-                                <Button title="Confirm!" color="red" onPress={confirmResign} />
-                            </View>
-                        </View>
-                    </View>
-                </Modal>
-
-                {/* Game Over Modal */}
-                <Modal visible={gameState.isGameOver} transparent={true} animationType="fade">
-                    <View style={styles.gameOverOverlay}>
-                        <View style={[styles.modalContent, styles.gameOverContent]}>
-                            <Text style={styles.gameOverTitle}>
-                                {gameState.winner === 'draw' ? 'Draw!' : `${gameState.winner === 'white' ? 'White' : 'Black'} Wins!`}
-                            </Text>
-                            {gameState.winReason && (
-                                <Text style={styles.gameOverReason}>by {gameState.winReason}</Text>
-                            )}
-
-                            <View style={styles.gameOverButtons}>
-                                <TouchableOpacity style={styles.playAgainButton} onPress={handleRestart} disabled={isRematching}>
-                                    <Text style={styles.playAgainText}>
-                                        {isRematching ? 'Searching...' : 'Play Again'}
-                                    </Text>
-                                </TouchableOpacity>
-
-                                <TouchableOpacity style={styles.homeButton} onPress={handleBackToHome}>
-                                    <Text style={styles.homeButtonText}>Home</Text>
-                                </TouchableOpacity>
-                            </View>
-                        </View>
-                    </View>
-                </Modal>
-            </View>
-        </View>
+  // Bot Turn Logic
+  React.useEffect(() => {
+    console.log(
+      "🤖 Bot Check -> status:",
+      matchStatus,
+      "| opponent:",
+      opponentId,
+      "| turn:",
+      gameState.turn,
     );
+    if (
+      mode === "online" &&
+      matchStatus === "active" &&
+      opponentId === "00000000-0000-0000-0000-000000000000" &&
+      gameState.turn !== localColor &&
+      !gameState.isGameOver
+    ) {
+      const thinkTime =
+        Math.floor(
+          Math.random() * (gameConfig.botParams.botMaxThinkTimeMs - 2000 + 1),
+        ) + 2000;
+      const timer = setTimeout(async () => {
+        const action = await calculateBotAction(engine, gameState.turn);
+        if (action) {
+          engine.applyAction(action);
+          setGameState({ ...engine.getState() });
+          await supabase
+            .from("matches")
+            .update({ game_state: engine.getState() })
+            .eq("id", matchId);
+        }
+      }, thinkTime);
+
+      return () => clearTimeout(timer);
+    }
+  }, [
+    mode,
+    matchStatus,
+    opponentId,
+    gameState.turn,
+    gameState.isGameOver,
+    localColor,
+    matchId,
+  ]);
+
+  // Override setGameState to ALSO push to Supabase if local player moved
+  const handleSetGameState = async (newState: GameState) => {
+    setGameState(newState);
+    if (mode === "online" && matchId) {
+      await supabase
+        .from("matches")
+        .update({ game_state: newState })
+        .eq("id", matchId);
+    }
+  };
+
+  // Centralized Audio Execution Engine listening to absolute State
+  const prevGameStateRef = React.useRef<GameState | null>(null);
+
+  React.useEffect(() => {
+    const prev = prevGameStateRef.current;
+    if (prev && gameState.moveHistory.length > prev.moveHistory.length) {
+      const lastMove = gameState.moveHistory[gameState.moveHistory.length - 1];
+      const isOpponentMove = gameState.turn === localColor; // If it's NOW localColor's turn, opponent just moved
+
+      if (gameState.isGameOver) {
+        if (gameState.winReason === "Checkmate") {
+          AudioService.playCheckmate();
+        } else {
+          AudioService.playGameEnd();
+        }
+      } else if (gameState.inCheck) {
+        AudioService.playCheck();
+      } else if (lastMove.type === "drop") {
+        isOpponentMove
+          ? AudioService.playOpponentDrop()
+          : AudioService.playDrop();
+      } else {
+        // Detect capture by checking total pocket lengths
+        const prevPocketTotal =
+          prev.pocket.white.length + prev.pocket.black.length;
+        const newPocketTotal =
+          gameState.pocket.white.length + gameState.pocket.black.length;
+
+        if (newPocketTotal > prevPocketTotal) {
+          isOpponentMove
+            ? AudioService.playOpponentCapture()
+            : AudioService.playCapture();
+        } else {
+          isOpponentMove
+            ? AudioService.playOpponentMove()
+            : AudioService.playMove();
+        }
+      }
+    }
+    prevGameStateRef.current = gameState;
+  }, [
+    gameState.moveHistory,
+    gameState.turn,
+    gameState.isGameOver,
+    gameState.inCheck,
+    gameState.pocket,
+    localColor,
+  ]);
+
+  // Game Over DB Sync
+  React.useEffect(() => {
+    const syncGameOver = async () => {
+      if (gameState.isGameOver && mode === "online" && matchId) {
+        const status =
+          gameState.winReason === "Resignation" ? "aborted" : "completed";
+        await supabase
+          .from("matches")
+          .update({
+            status,
+            game_state: engine.getState(),
+          })
+          .eq("id", matchId);
+
+        if (gameState.winner === localColor) {
+          if (isPrivateMatch) {
+            // Friendly matches do not yield economy rewards
+            // Just show a simple notification
+            setCustomAlert({
+              title: "Victory!",
+              message: "You won the match!",
+            });
+          } else {
+            const { data } = await supabase.rpc("claim_victory_reward", {
+              p_match_id: matchId,
+            });
+            if (data?.success === true) {
+              setCustomAlert({
+                title: "Victory!",
+                message: `You won ${data.reward} coins!`,
+              });
+            }
+          }
+        }
+      }
+    };
+    syncGameOver();
+  }, [
+    gameState.isGameOver,
+    mode,
+    matchId,
+    gameState.winReason,
+    engine,
+    gameState.winner,
+    localColor,
+  ]);
+
+  const [resignModalVisible, setResignModalVisible] = useState(false);
+
+  const handleResign = () => {
+    setResignModalVisible(true);
+  };
+
+  const confirmResign = () => {
+    setGameState(engine.resign("white")); // Assuming hardcoded white for local test
+    setResignModalVisible(false);
+    AudioService.playGameEnd();
+  };
+
+  const handleRestart = async () => {
+    if (mode === "local") {
+      setGameState(engine.resetState());
+      AudioService.playGameStart();
+    } else {
+      setIsRematching(true);
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (session) {
+        try {
+          const result = await MatchmakingService.findOrCreateMatch(
+            session.user.id,
+          );
+          setIsRematching(false);
+          navigation.replace("Game", {
+            mode: "online",
+            matchId: result.matchId,
+            localColor: result.color,
+          });
+        } catch (error: any) {
+          setIsRematching(false);
+          setCustomAlert({
+            title: "Matchmaking Error",
+            message: error.message || "Failed to find a match.",
+          });
+          navigation.navigate("Home");
+        }
+      } else {
+        setIsRematching(false);
+        navigation.navigate("Home");
+      }
+    }
+  };
+
+  const handleBackToHome = () => {
+    navigation.navigate("Home");
+  };
+
+  return (
+    <View style={styles.container}>
+      <View
+        style={[
+          styles.contentWrapper,
+          {
+            paddingTop: Math.max(insets.top, 10),
+            paddingBottom: gameState.isGameOver ? 240 : 20,
+          },
+        ]}
+      >
+        {/* Waiting Overlay */}
+        {mode === "online" && matchStatus === "waiting" && (
+          <View style={styles.waitingOverlay} pointerEvents="none">
+            <View style={styles.waitingContent}>
+              <Text style={styles.waitingText}>
+                Matching you to an opponent in {matchmakingCountdown}s
+              </Text>
+            </View>
+          </View>
+        )}
+
+        {/* The Star of the Show: The 2.5D Board */}
+        <ChessBoard
+          localColor={mode === "online" ? localColor || "white" : "white"}
+          engine={engine}
+          gameState={gameState}
+          setGameState={handleSetGameState}
+          isInputDisabled={
+            mode === "online" &&
+            (gameState.turn !== localColor || matchStatus === "waiting")
+          }
+          timeLeft={timeLeft}
+          matchStatus={matchStatus}
+          opponentName={
+            mode === "local"
+              ? "Opponent"
+              : opponentId === "00000000-0000-0000-0000-000000000000"
+                ? gameConfig.botParams.name
+                : "Opponent"
+          }
+        />
+
+        <View style={styles.footer}>
+          <TouchableOpacity
+            style={styles.mainResignButton}
+            onPress={handleResign}
+            disabled={gameState.isGameOver}
+          >
+            <Text style={styles.mainResignButtonText}>RESIGN</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Resign Confirmation Modal */}
+        <Modal
+          visible={resignModalVisible}
+          transparent={true}
+          animationType="fade"
+        >
+          <View style={styles.modalOverlay}>
+            <View
+              style={[
+                styles.modalContent,
+                styles.gameOverContent,
+                { paddingBottom: Math.max(insets.bottom, 24) },
+              ]}
+            >
+              <Text style={[styles.modalTitle, { textAlign: "center" }]}>
+                Resign Game
+              </Text>
+              <Text style={styles.modalText}>
+                Are you sure you want to resign?
+              </Text>
+              <View style={styles.modalButtons}>
+                <TouchableOpacity
+                  style={styles.cancelButton}
+                  onPress={() => setResignModalVisible(false)}
+                >
+                  <Text style={styles.cancelButtonText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.confirmButton}
+                  onPress={confirmResign}
+                >
+                  <Text style={styles.confirmButtonText}>Confirm!</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+
+        {/* Game Over Modal */}
+        <Modal
+          visible={gameState.isGameOver}
+          transparent={true}
+          animationType="fade"
+        >
+          <View style={styles.gameOverOverlay}>
+            <View
+              style={[
+                styles.modalContent,
+                styles.gameOverContent,
+                { paddingBottom: Math.max(insets.bottom, 24) },
+              ]}
+            >
+              <Text style={styles.gameOverTitle}>
+                {gameState.winner === "draw"
+                  ? "Draw!"
+                  : `${gameState.winner === "white" ? "White" : "Black"} Wins!`}
+              </Text>
+              {gameState.winReason && (
+                <Text style={styles.gameOverReason}>
+                  by {gameState.winReason}
+                </Text>
+              )}
+
+              <View style={styles.gameOverButtons}>
+                <TouchableOpacity
+                  style={styles.playAgainButton}
+                  onPress={handleRestart}
+                  disabled={isRematching}
+                >
+                  <Text style={styles.playAgainText}>
+                    {isRematching ? "Searching..." : "Play Again"}
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.homeButton}
+                  onPress={handleBackToHome}
+                >
+                  <Text style={styles.homeButtonText}>Home</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+
+        {/* Custom Alert Modal */}
+        <Modal visible={!!customAlert} transparent={true} animationType="fade">
+          <View style={styles.modalOverlayCenter}>
+            <View style={styles.customAlertContent}>
+              <Text style={styles.customAlertTitle}>{customAlert?.title}</Text>
+              <Text style={styles.customAlertMessage}>
+                {customAlert?.message}
+              </Text>
+              <TouchableOpacity
+                style={styles.customAlertBtn}
+                onPress={() => setCustomAlert(null)}
+              >
+                <Text style={styles.customAlertBtnText}>
+                  {customAlert?.buttonText || "Great!"}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
+      </View>
+    </View>
+  );
 };
 
 const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-        backgroundColor: defaultTheme.background, // Clean Green Background
-    },
-    contentWrapper: {
-        flex: 1,
-        paddingHorizontal: 20,
-        paddingBottom: 20,
-        justifyContent: 'space-between',
-    },
-    header: {
-        alignItems: 'center',
-        marginVertical: 10,
-    },
-    headerText: {
-        fontSize: 24,
-        color: defaultTheme.ui.textLight,
-        fontWeight: 'bold',
-        textShadowColor: 'rgba(0, 0, 0, 0.3)',
-        textShadowOffset: { width: 0, height: 2 },
-        textShadowRadius: 4,
-    },
-    waitingOverlay: {
-        position: 'absolute',
-        top: 120,
-        left: 0,
-        width: '100%',
-        alignItems: 'center',
-        zIndex: 50,
-    },
-    waitingContent: {
-        backgroundColor: 'rgba(0,0,0,0.7)',
-        paddingHorizontal: 20,
-        paddingVertical: 10,
-        borderRadius: 20,
-    },
-    waitingText: {
-        color: 'white',
-        fontWeight: 'bold',
-        fontSize: 16,
-    },
-    footer: {
-        alignItems: 'center',
-        marginVertical: 20,
-    },
-    modalOverlay: {
-        flex: 1,
-        backgroundColor: 'rgba(0, 0, 0, 0.6)',
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    gameOverOverlay: {
-        ...StyleSheet.absoluteFillObject,
-        backgroundColor: 'rgba(0, 0, 0, 0.7)',
-        justifyContent: 'center',
-        alignItems: 'center',
-        zIndex: 50,
-    },
-    modalContent: {
-        backgroundColor: defaultTheme.ui.pocketBackground,
-        padding: 24,
-        borderRadius: 12,
-        alignItems: 'center',
-        width: '80%',
-        maxWidth: 300,
-        elevation: 10,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 5 },
-        shadowOpacity: 0.5,
-        shadowRadius: 10,
-    },
-    gameOverContent: {
-        backgroundColor: '#2A343A',
-        minHeight: 200,
-        justifyContent: 'center',
-    },
-    modalTitle: {
-        fontSize: 20,
-        fontWeight: 'bold',
-        color: 'white',
-        marginBottom: 10,
-    },
-    modalText: {
-        fontSize: 16,
-        color: '#ccc',
-        marginBottom: 20,
-        textAlign: 'center',
-    },
-    modalButtons: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        width: '100%',
-    },
-    gameOverTitle: {
-        fontSize: 32,
-        fontWeight: 'bold',
-        color: '#FFFFFF',
-        marginBottom: 10,
-        textAlign: 'center',
-    },
-    gameOverReason: {
-        fontSize: 18,
-        color: '#D0D0D0',
-        marginBottom: 30,
-        textAlign: 'center',
-        fontWeight: '600',
-    },
-    playAgainButton: {
-        backgroundColor: '#27ae60', // A nice green color
-        paddingVertical: 12,
-        paddingHorizontal: 20,
-        borderRadius: 8,
-        marginRight: 10,
-    },
-    playAgainText: {
-        color: 'white',
-        fontWeight: 'bold',
-        fontSize: 16,
-    },
-    homeButton: {
-        backgroundColor: '#607D8B', // Muted slate color for going back
-        paddingVertical: 12,
-        paddingHorizontal: 20,
-        borderRadius: 8,
-    },
-    homeButtonText: {
-        color: 'white',
-        fontWeight: 'bold',
-        fontSize: 16,
-    },
-    gameOverButtons: {
-        flexDirection: 'row',
-        marginTop: 10,
-    }
+  container: {
+    flex: 1,
+    backgroundColor: defaultTheme.background, // Clean Green Background
+  },
+  contentWrapper: {
+    flex: 1,
+    paddingHorizontal: 20,
+    paddingBottom: 20,
+    justifyContent: "space-between",
+  },
+  header: {
+    alignItems: "center",
+    marginVertical: 10,
+  },
+  headerText: {
+    fontSize: 24,
+    color: defaultTheme.ui.textLight,
+    fontFamily: "PublicSans_900Black",
+    textShadowColor: "rgba(0, 0, 0, 0.3)",
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 4,
+  },
+  waitingOverlay: {
+    position: "absolute",
+    top: 120,
+    alignSelf: "center",
+    zIndex: 50,
+    shadowColor: "#FFD700",
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.6,
+    shadowRadius: 15,
+    elevation: 10,
+  },
+  waitingContent: {
+    backgroundColor: "rgba(30, 49, 38, 0.85)",
+    paddingHorizontal: 24,
+    paddingVertical: 14,
+    borderRadius: 30,
+    borderWidth: 1,
+    borderColor: "#FFD700",
+  },
+  waitingText: {
+    color: "white",
+    fontFamily: "PublicSans_700Bold",
+    fontSize: 16,
+  },
+  footer: {
+    alignItems: "center",
+    marginVertical: 20,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.6)",
+    justifyContent: "flex-end",
+  },
+  gameOverOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0, 0, 0, 0.25)",
+    justifyContent: "flex-end",
+    zIndex: 50,
+  },
+  modalContent: {
+    backgroundColor: defaultTheme.ui.pocketBackground,
+    padding: 24,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 0,
+    width: "100%",
+    maxWidth: "100%",
+    elevation: 10,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 5 },
+    shadowOpacity: 0.5,
+    shadowRadius: 10,
+  },
+  gameOverContent: {
+    backgroundColor: "#2A343A",
+    minHeight: 200,
+    justifyContent: "center",
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontFamily: "PublicSans_700Bold",
+    color: "white",
+    marginBottom: 10,
+  },
+  modalText: {
+    fontSize: 16,
+    fontFamily: "PublicSans_400Regular",
+    color: "#ccc",
+    marginBottom: 20,
+    textAlign: "center",
+  },
+  modalButtons: {
+    flexDirection: "row",
+    width: "100%",
+    gap: 12,
+  },
+  gameOverTitle: {
+    fontSize: 32,
+    fontFamily: "PublicSans_900Black",
+    color: "#FFFFFF",
+    marginBottom: 10,
+    textAlign: "center",
+  },
+  gameOverReason: {
+    fontSize: 18,
+    fontFamily: "PublicSans_400Regular",
+    color: "#D0D0D0",
+    marginBottom: 30,
+    textAlign: "center",
+  },
+  mainResignButton: {
+    backgroundColor: "rgba(255, 255, 255, 0.15)", // Frosted glass
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.3)",
+    paddingVertical: 12,
+    paddingHorizontal: 32,
+    borderRadius: 25,
+    alignSelf: "center",
+  },
+  mainResignButtonText: {
+    color: "#e74c3c",
+    fontFamily: "PublicSans_700Bold",
+    fontSize: 16,
+    textAlign: "center",
+  },
+  cancelButton: {
+    flex: 1,
+    backgroundColor: "#607D8B", // Muted slate
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: "center",
+  },
+  cancelButtonText: {
+    color: "white",
+    fontFamily: "PublicSans_700Bold",
+    fontSize: 16,
+  },
+  confirmButton: {
+    flex: 1,
+    backgroundColor: "#e74c3c", // Punchy red
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: "center",
+  },
+  confirmButtonText: {
+    color: "white",
+    fontFamily: "PublicSans_700Bold",
+    fontSize: 16,
+  },
+
+  playAgainButton: {
+    flex: 1,
+    backgroundColor: "#27ae60",
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: "center",
+  },
+  playAgainText: {
+    color: "white",
+    fontFamily: "PublicSans_700Bold",
+    fontSize: 16,
+  },
+  homeButton: {
+    flex: 1,
+    backgroundColor: "#607D8B",
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: "center",
+  },
+  homeButtonText: {
+    color: "white",
+    fontFamily: "PublicSans_700Bold",
+    fontSize: 16,
+  },
+  gameOverButtons: {
+    flexDirection: "row",
+    width: "100%",
+    gap: 12,
+    marginTop: 10,
+  },
+  modalOverlayCenter: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.7)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  customAlertContent: {
+    backgroundColor: "#1E3126",
+    padding: 30,
+    borderRadius: 16,
+    width: "85%",
+    maxWidth: 340,
+    elevation: 10,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 5 },
+    shadowOpacity: 0.5,
+    shadowRadius: 10,
+    alignItems: "center",
+  },
+  customAlertTitle: {
+    fontSize: 22,
+    fontFamily: "PublicSans_700Bold",
+    color: "#FFD700",
+    marginBottom: 12,
+    textAlign: "center",
+  },
+  customAlertMessage: {
+    fontSize: 16,
+    fontFamily: "PublicSans_400Regular",
+    color: "white",
+    textAlign: "center",
+    marginBottom: 24,
+    lineHeight: 22,
+  },
+  customAlertBtn: {
+    backgroundColor: "#27ae60",
+    paddingVertical: 12,
+    paddingHorizontal: 30,
+    borderRadius: 25,
+  },
+  customAlertBtnText: {
+    color: "white",
+    fontSize: 16,
+    fontFamily: "PublicSans_700Bold",
+  },
 });
