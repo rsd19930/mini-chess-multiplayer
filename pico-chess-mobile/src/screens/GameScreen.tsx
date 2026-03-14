@@ -491,12 +491,13 @@ export const GameScreen: React.FC<GameScreenProps> = ({
           <View style={styles.waitingOverlay} pointerEvents="none">
             <View style={styles.waitingContent}>
               <Text style={styles.waitingText}>
-                Matching you to an opponent in {matchmakingCountdown}s
+                {isPrivateMatch
+                  ? "Waiting for your friend to join!"
+                  : `Matching you to an opponent in ${matchmakingCountdown}s`}
               </Text>
             </View>
           </View>
         )}
-
         {/* The Star of the Show: The 2.5D Board */}
         <ChessBoard
           localColor={mode === "online" ? localColor || "white" : "white"}
@@ -518,15 +519,17 @@ export const GameScreen: React.FC<GameScreenProps> = ({
           }
         />
 
-        <View style={styles.footer}>
-          <TouchableOpacity
-            style={styles.mainResignButton}
-            onPress={handleResign}
-            disabled={gameState.isGameOver}
-          >
-            <Text style={styles.mainResignButtonText}>RESIGN</Text>
-          </TouchableOpacity>
-        </View>
+        {!gameState.isGameOver && (
+          <View style={styles.footer}>
+            <TouchableOpacity
+              style={styles.mainResignButton}
+              onPress={handleResign}
+              disabled={gameState.isGameOver}
+            >
+              <Text style={styles.mainResignButtonText}>RESIGN</Text>
+            </TouchableOpacity>
+          </View>
+        )}
 
         {/* Resign Confirmation Modal */}
         <Modal
@@ -580,10 +583,17 @@ export const GameScreen: React.FC<GameScreenProps> = ({
                 { paddingBottom: Math.max(insets.bottom, 24) },
               ]}
             >
+              {gameState.winner === localColor && (
+                <View style={styles.victoryBadge}>
+                  <Text style={{ fontSize: 30 }}>🏆</Text>
+                </View>
+              )}
               <Text style={styles.gameOverTitle}>
                 {gameState.winner === "draw"
                   ? "Draw!"
-                  : `${gameState.winner === "white" ? "White" : "Black"} Wins!`}
+                  : gameState.winner === localColor
+                    ? "You Win!"
+                    : `${gameState.winner === "white" ? "White" : "Black"} Wins!`}
               </Text>
               {gameState.winReason && (
                 <Text style={styles.gameOverReason}>
@@ -665,24 +675,25 @@ const styles = StyleSheet.create({
     top: 120,
     alignSelf: "center",
     zIndex: 50,
-    shadowColor: "#FFD700",
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.6,
-    shadowRadius: 15,
+    shadowOpacity: 0.2,
+    shadowRadius: 10,
     elevation: 10,
   },
   waitingContent: {
-    backgroundColor: "rgba(30, 49, 38, 0.85)",
+    backgroundColor: "#ffffff",
     paddingHorizontal: 24,
     paddingVertical: 14,
-    borderRadius: 30,
-    borderWidth: 1,
-    borderColor: "#FFD700",
+    borderRadius: 24,
+    borderWidth: 3,
+    borderColor: "#facc15",
   },
   waitingText: {
-    color: "white",
+    color: "#2A343A",
     fontFamily: "PublicSans_700Bold",
     fontSize: 16,
+    textAlign: "center",
   },
   footer: {
     alignItems: "center",
@@ -715,20 +726,20 @@ const styles = StyleSheet.create({
     shadowRadius: 10,
   },
   gameOverContent: {
-    backgroundColor: "#2A343A",
+    backgroundColor: "#ffffff",
     minHeight: 200,
     justifyContent: "center",
   },
   modalTitle: {
     fontSize: 20,
     fontFamily: "PublicSans_700Bold",
-    color: "white",
+    color: "#2A343A",
     marginBottom: 10,
   },
   modalText: {
     fontSize: 16,
     fontFamily: "PublicSans_400Regular",
-    color: "#ccc",
+    color: "#2A343A",
     marginBottom: 20,
     textAlign: "center",
   },
@@ -740,28 +751,29 @@ const styles = StyleSheet.create({
   gameOverTitle: {
     fontSize: 32,
     fontFamily: "PublicSans_900Black",
-    color: "#FFFFFF",
+    color: "#2A343A",
     marginBottom: 10,
     textAlign: "center",
   },
   gameOverReason: {
     fontSize: 18,
     fontFamily: "PublicSans_400Regular",
-    color: "#D0D0D0",
+    color: "#2A343A",
     marginBottom: 30,
     textAlign: "center",
   },
   mainResignButton: {
-    backgroundColor: "rgba(255, 255, 255, 0.15)", // Frosted glass
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.3)",
+    backgroundColor: "#ff6b6b",
+    borderWidth: 2,
+    borderBottomWidth: 6,
+    borderColor: "#c0392b",
     paddingVertical: 12,
     paddingHorizontal: 32,
     borderRadius: 25,
     alignSelf: "center",
   },
   mainResignButtonText: {
-    color: "#e74c3c",
+    color: "white",
     fontFamily: "PublicSans_700Bold",
     fontSize: 16,
     textAlign: "center",
@@ -793,9 +805,12 @@ const styles = StyleSheet.create({
 
   playAgainButton: {
     flex: 1,
-    backgroundColor: "#27ae60",
+    backgroundColor: "#4ade80",
+    borderColor: "#16a34a",
+    borderWidth: 2,
+    borderBottomWidth: 6,
     paddingVertical: 14,
-    borderRadius: 12,
+    borderRadius: 20,
     alignItems: "center",
   },
   playAgainText: {
@@ -805,9 +820,12 @@ const styles = StyleSheet.create({
   },
   homeButton: {
     flex: 1,
-    backgroundColor: "#607D8B",
+    backgroundColor: "#38bdf8",
+    borderColor: "#0284c7",
+    borderWidth: 2,
+    borderBottomWidth: 6,
     paddingVertical: 14,
-    borderRadius: 12,
+    borderRadius: 20,
     alignItems: "center",
   },
   homeButtonText: {
@@ -828,9 +846,11 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   customAlertContent: {
-    backgroundColor: "#1E3126",
+    backgroundColor: "#ffffff",
+    borderColor: "#facc15",
+    borderWidth: 4,
     padding: 30,
-    borderRadius: 16,
+    borderRadius: 24,
     width: "85%",
     maxWidth: 340,
     elevation: 10,
@@ -843,27 +863,43 @@ const styles = StyleSheet.create({
   customAlertTitle: {
     fontSize: 22,
     fontFamily: "PublicSans_700Bold",
-    color: "#FFD700",
+    color: "#2A343A",
     marginBottom: 12,
     textAlign: "center",
   },
   customAlertMessage: {
     fontSize: 16,
     fontFamily: "PublicSans_400Regular",
-    color: "white",
+    color: "#2A343A",
     textAlign: "center",
     marginBottom: 24,
     lineHeight: 22,
   },
   customAlertBtn: {
-    backgroundColor: "#27ae60",
+    backgroundColor: "#4ade80",
+    borderColor: "#16a34a",
+    borderWidth: 2,
+    borderBottomWidth: 6,
     paddingVertical: 12,
     paddingHorizontal: 30,
-    borderRadius: 25,
+    borderRadius: 20,
   },
   customAlertBtnText: {
     color: "white",
     fontSize: 16,
     fontFamily: "PublicSans_700Bold",
+  },
+  victoryBadge: {
+    position: "absolute",
+    top: -30,
+    alignSelf: "center",
+    backgroundColor: "#facc15",
+    borderRadius: 30,
+    width: 60,
+    height: 60,
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 3,
+    borderColor: "white",
   },
 });

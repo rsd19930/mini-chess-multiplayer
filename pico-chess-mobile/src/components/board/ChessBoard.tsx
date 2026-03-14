@@ -266,13 +266,17 @@ export const ChessBoard: React.FC<ChessBoardProps> = ({
           >
             {name}
           </Text>
-          {isActive && timeLeft !== undefined && (
+          <View style={[styles.timerPill, { opacity: isActive ? 1 : 0 }]}>
             <Text
-              style={[styles.playerTimer, timeLeft <= 10 && styles.lowTime]}
+              style={[
+                styles.playerTimer,
+                (timeLeft ?? 0) <= 10 && styles.lowTime,
+              ]}
             >
-              ⏱ 00:{timeLeft < 10 ? `0${timeLeft}` : timeLeft}
+              ⏱ 00:
+              {(timeLeft ?? 0) < 10 ? `0${timeLeft ?? 0}` : (timeLeft ?? 0)}
             </Text>
-          )}
+          </View>
         </View>
         {children}
       </View>
@@ -448,21 +452,16 @@ const styles = StyleSheet.create({
   playerContainer: {
     width: "100%",
     padding: 12,
-    borderRadius: 16,
+    borderRadius: 20,
     marginVertical: 4,
-    backgroundColor: "rgba(255, 255, 255, 0.15)",
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.3)",
-    elevation: 5,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
+    backgroundColor: "rgba(255, 255, 255, 0.7)",
+    borderWidth: 5,
+    borderColor: "transparent",
   },
   activePlayerContainer: {
-    backgroundColor: "rgba(255, 215, 0, 0.1)",
-    borderColor: "#FFD700",
-    borderWidth: 1,
+    backgroundColor: "rgba(255, 255, 255, 0.95)",
+    borderColor: "#4ade80", // Can be overridden dynamically later if needed
+    borderWidth: 5,
   },
   playerHeader: {
     flexDirection: "row",
@@ -473,21 +472,27 @@ const styles = StyleSheet.create({
     marginBottom: -4,
   },
   playerName: {
-    color: "#f8f9fa",
+    color: "#2A343A",
     fontSize: 14,
     fontFamily: "PublicSans_700Bold",
     textTransform: "uppercase",
   },
   activePlayerText: {
-    color: "#4ade80",
+    color: "#2A343A",
+  },
+  timerPill: {
+    backgroundColor: "rgba(255, 165, 0, 0.2)",
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
   },
   playerTimer: {
-    color: "white",
+    color: "#d35400", // Dark orange
     fontSize: 16,
     fontFamily: "PublicSans_700Bold",
     fontVariant: ["tabular-nums"],
   },
   lowTime: {
-    color: "#ef4444",
+    color: "#ef4444", // Keep red for low time
   },
 });
