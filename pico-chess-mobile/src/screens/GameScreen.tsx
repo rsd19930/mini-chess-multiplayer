@@ -8,6 +8,7 @@ import {
   TouchableOpacity,
   Alert,
   AppState,
+  ImageBackground,
 } from "react-native";
 import { useKeepAwake } from "expo-keep-awake";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -471,7 +472,11 @@ export const GameScreen: React.FC<GameScreenProps> = ({
   };
 
   return (
-    <View style={styles.container}>
+    <ImageBackground
+      source={require("../../assets/game-bg.jpg")}
+      style={styles.container}
+      resizeMode="cover"
+    >
       <View
         style={[
           styles.contentWrapper,
@@ -628,7 +633,7 @@ export const GameScreen: React.FC<GameScreenProps> = ({
           </View>
         </Modal>
       </View>
-    </View>
+    </ImageBackground>
   );
 };
 

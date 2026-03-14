@@ -45,5 +45,3 @@ yarn-error.*
 *.aab
 build-*.apk
 build-*.aab
-
-google-services.json
