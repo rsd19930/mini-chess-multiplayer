@@ -61,6 +61,17 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
   const [session, setSession] = useState<any>(null);
   const [isSearchingOnline, setIsSearchingOnline] = useState(false);
   const [isCreatingPrivateMatch, setIsCreatingPrivateMatch] = useState(false);
+  const [pveState, setPveState] = useState<0 | 1 | 2 | 3>(0);
+  const [botCosts, setBotCosts] = useState({
+    easy: 150,
+    medium: 100,
+    hard: 50,
+  });
+  const [pveDifficulty, setPveDifficulty] = useState<{
+    label: string;
+    cost: number;
+    depth: number;
+  } | null>(null);
   const [coinBalance, setCoinBalance] = useState<number>(0);
   const [referralBonus, setReferralBonus] = useState<number>(0);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
@@ -189,6 +200,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
             setCustomAlert({
               title: "Referral Check",
               message: `You joined your friend's game! They earned a ${bonusAmount} coin bonus.`,
+              buttonText: "Great!",
             });
           }
         }
@@ -307,6 +319,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
           setCustomAlert({
             title: "Daily Bonus!",
             message: `You received ${data.amount_claimed} free coins!`,
+            buttonText: "Great!",
           });
         }
       } catch (err) {
@@ -338,6 +351,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
               title: "Welcome to Pico Chess!",
               message:
                 "We have credited your account with 1,000 starter coins. Good luck on the board!",
+              buttonText: "Great!",
             });
         }
       }
@@ -364,16 +378,23 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
     );
 
     // Background global variables loaded once
-    const fetchReferralBonus = async () => {
+    const fetchEconomyConfig = async () => {
       const { data, error } = await supabase
         .from("economy_config")
-        .select("referral_bonus")
+        .select("referral_bonus, bot_cost_easy, bot_cost_medium, bot_cost_hard")
         .eq("id", 1)
         .single();
 
-      if (!error && data && mounted) setReferralBonus(data.referral_bonus);
+      if (!error && data && mounted) {
+        setReferralBonus(data.referral_bonus);
+        setBotCosts({
+          easy: data.bot_cost_easy,
+          medium: data.bot_cost_medium,
+          hard: data.bot_cost_hard,
+        });
+      }
     };
-    fetchReferralBonus();
+    fetchEconomyConfig();
 
     return () => {
       mounted = false;
@@ -415,6 +436,88 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
 
   const handlePlayLocal = () => {
     navigation.navigate("Game", { mode: "local" });
+  };
+
+  const handlePlayBotColor = async (color: "white" | "black") => {
+    if (!session) {
+      setCustomAlert({
+        title: "Sign In Required",
+        message: "You must be signed in to play against PicoBot!",
+        buttonText: "Okay",
+      });
+      setPveState(0);
+      return;
+    }
+
+    if (coinBalance < (pveDifficulty?.cost || 0)) {
+      setCustomAlert({
+        title: "Insufficient Coins",
+        message: `You need 🪙 ${pveDifficulty?.cost} to play at ${pveDifficulty?.label} difficulty.`,
+      });
+      setPveState(0);
+      return;
+    }
+
+    setPveState(3);
+
+    const botUuid = "00000000-0000-0000-0000-000000000000";
+    const nowIso = new Date().toISOString();
+
+    const { data: matchData, error: matchError } = await supabase
+      .from("matches")
+      .insert([
+        {
+          player_white: color === "white" ? session.user.id : botUuid,
+          player_black: color === "black" ? session.user.id : botUuid,
+          status: "active",
+          is_private: false,
+          started_at: nowIso,
+        },
+      ])
+      .select()
+      .single();
+
+    if (matchError || !matchData) {
+      setCustomAlert({
+        title: "Error",
+        message: "Failed to create match.",
+      });
+      setPveState(0);
+      return;
+    }
+
+    const { data: rpcData, error: rpcError } = await supabase.rpc(
+      "pay_bot_fee",
+      {
+        p_match_id: matchData.id,
+        p_difficulty: pveDifficulty!.depth,
+      },
+    );
+
+    if (rpcError || rpcData?.success === false) {
+      console.error("RPC Error:", rpcError ?? rpcData);
+      setCustomAlert({
+        title: "Error",
+        message:
+          rpcError?.message ||
+          rpcData?.message ||
+          "Failed to process entry fee. Try again.",
+      });
+      setPveState(0);
+      return;
+    }
+
+    if (rpcData?.success) {
+      setCoinBalance(rpcData.coins);
+    }
+
+    setPveState(0);
+    navigation.navigate("Game", {
+      mode: "online",
+      matchId: matchData.id,
+      localColor: color,
+      botDepth: pveDifficulty!.depth,
+    });
   };
 
   const executePlayOnline = async () => {
@@ -557,6 +660,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
       setCustomAlert({
         title: "Success!",
         message: `Thank you for your purchase! ${coinsToAdd} coins have been securely added to your vault.`,
+        buttonText: "Great!",
       });
     } catch (error: any) {
       if (!error.userCancelled) {
@@ -636,6 +740,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
       setCustomAlert({
         title: "Thank You!",
         message: "Your feedback has been submitted successfully.",
+        buttonText: "Great!",
       });
     }
   };
@@ -683,6 +788,146 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
 
         {/* Main Content (Title and Menu Buttons) */}
         <View style={styles.centerContent}>
+          {/* New PvE Cascading UI */}
+          {pveState === 0 && (
+            <TouchableOpacity
+              style={[
+                styles.menuButton,
+                styles.buttonPvE,
+                (isSearchingOnline || isCreatingPrivateMatch) && {
+                  opacity: 0.7,
+                },
+              ]}
+              onPress={() => setPveState(1)}
+              disabled={isSearchingOnline || isCreatingPrivateMatch}
+            >
+              <Text style={styles.menuButtonText}>Play with PicoBot</Text>
+            </TouchableOpacity>
+          )}
+
+          {pveState === 1 && (
+            <View style={styles.pveOptionsRow}>
+              <TouchableOpacity
+                style={styles.pvePill}
+                onPress={() => {
+                  setPveDifficulty({
+                    label: "Easy",
+                    cost: botCosts.easy,
+                    depth: 1,
+                  });
+                  setPveState(2);
+                }}
+              >
+                <Text
+                  style={styles.pvePillText}
+                  numberOfLines={1}
+                  adjustsFontSizeToFit={true}
+                >
+                  Easy 🪙 {botCosts.easy}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.pvePill}
+                onPress={() => {
+                  setPveDifficulty({
+                    label: "Medium",
+                    cost: botCosts.medium,
+                    depth: 2,
+                  });
+                  setPveState(2);
+                }}
+              >
+                <Text
+                  style={styles.pvePillText}
+                  numberOfLines={1}
+                  adjustsFontSizeToFit={true}
+                >
+                  Medium 🪙 {botCosts.medium}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.pvePill}
+                onPress={() => {
+                  setPveDifficulty({
+                    label: "Hard",
+                    cost: botCosts.hard,
+                    depth: 3,
+                  });
+                  setPveState(2);
+                }}
+              >
+                <Text
+                  style={styles.pvePillText}
+                  numberOfLines={1}
+                  adjustsFontSizeToFit={true}
+                >
+                  Hard 🪙 {botCosts.hard}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.buttonCancelSmall}
+                onPress={() => setPveState(0)}
+              >
+                <FontAwesome5 name="times" size={16} color="white" />
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {pveState === 2 && (
+            <View style={styles.pveOptionsRow}>
+              <TouchableOpacity
+                style={[
+                  styles.pvePill,
+                  {
+                    backgroundColor: "#ffffff",
+                    borderColor: "#d1d5db",
+                  },
+                ]}
+                onPress={() => handlePlayBotColor("white")}
+              >
+                <Text
+                  style={[styles.pvePillText, { color: "#2A343A" }]}
+                  numberOfLines={1}
+                  adjustsFontSizeToFit={true}
+                >
+                  Play as White
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.pvePill,
+                  {
+                    backgroundColor: "#2A343A",
+                    borderColor: "#111827",
+                  },
+                ]}
+                onPress={() => handlePlayBotColor("black")}
+              >
+                <Text
+                  style={styles.pvePillText}
+                  numberOfLines={1}
+                  adjustsFontSizeToFit={true}
+                >
+                  Play as Black
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.buttonCancelSmall}
+                onPress={() => setPveState(0)}
+              >
+                <FontAwesome5 name="times" size={16} color="white" />
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {pveState === 3 && (
+            <View
+              style={[styles.menuButton, styles.buttonPvE, { opacity: 0.7 }]}
+            >
+              <Text style={styles.menuButtonText}>Starting Match...</Text>
+            </View>
+          )}
+
           {__DEV__ && (
             <TouchableOpacity
               style={[styles.menuButton, styles.buttonLocal]}
@@ -703,10 +948,13 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
             disabled={isSearchingOnline || isCreatingPrivateMatch}
           >
             <Text style={styles.menuButtonText}>
-              {isSearchingOnline
-                ? "Searching..."
-                : `Play Online (${gameConfig.economyParams.matchFee} 🪙)`}
+              {isSearchingOnline ? "Searching..." : "Play Online"}
             </Text>
+            {!isSearchingOnline && (
+              <Text style={styles.friendSubtext}>
+                🪙 {gameConfig.economyParams.matchFee}
+              </Text>
+            )}
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -719,10 +967,12 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
             disabled={isSearchingOnline || isCreatingPrivateMatch}
           >
             <Text style={styles.menuButtonText}>
-              {isCreatingPrivateMatch ? "Creating..." : "Play a Friend"}
+              {isCreatingPrivateMatch
+                ? "Creating..."
+                : "Invite a friend to play"}
             </Text>
             <Text style={styles.friendSubtext}>
-              Invite & earn {referralBonus} coins!
+              Get 🪙 {referralBonus} bonus!
             </Text>
           </TouchableOpacity>
 
@@ -732,11 +982,9 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
               onPress={handleBuyCoins}
             >
               <View style={styles.coinShopLeft}>
-                <Text style={styles.coinShopIconPlaceholder}>🪙</Text>
                 <Text style={styles.coinShopTitle}>
-                  {storePackage.product.title
-                    ? storePackage.product.title.replace(/\(.*\)/, "").trim()
-                    : "1000 Coins"}
+                  🪙{" "}
+                  {storePackage.product.identifier.split("_").pop() || "1000"}
                 </Text>
               </View>
               <View style={styles.coinShopPriceContainer}>
@@ -807,7 +1055,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
                 onPress={() => setCustomAlert(null)}
               >
                 <Text style={styles.customAlertBtnText}>
-                  {customAlert?.buttonText || "Great!"}
+                  {customAlert?.buttonText || "Okay"}
                 </Text>
               </TouchableOpacity>
             </View>
@@ -1145,10 +1393,58 @@ const styles = StyleSheet.create({
   },
   tutorialBullet: {
     color: "#4ade80",
-    fontSize: 18,
+    fontSize: 20,
     fontFamily: "PublicSans_700Bold",
-    marginRight: 12,
+    marginRight: 10,
+    marginTop: -2,
     width: 20,
+  },
+  buttonPvE: {
+    backgroundColor: "#2A343A",
+    borderColor: "#FFD700",
+    borderWidth: 2,
+    borderBottomWidth: 6,
+    borderRadius: 25,
+  },
+  pveOptionsRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    width: "100%",
+    marginBottom: 16,
+    gap: 10,
+  },
+  pvePill: {
+    flex: 1,
+    paddingVertical: 10,
+    paddingHorizontal: 2,
+    marginHorizontal: 2,
+    borderWidth: 2,
+    borderBottomWidth: 6,
+    borderRadius: 20,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#2A343A",
+    borderColor: "#FFD700",
+  },
+  pvePillText: {
+    color: "white",
+    fontSize: 11,
+    fontWeight: "bold",
+    fontFamily: "PublicSans_700Bold",
+    textAlign: "center",
+  },
+  buttonCancelSmall: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "#4b5563",
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 2,
+    borderBottomWidth: 6,
+    borderColor: "#374151",
+    marginLeft: 4,
   },
   tutorialText: {
     color: "#2A343A",

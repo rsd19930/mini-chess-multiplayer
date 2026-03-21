@@ -103,8 +103,12 @@ function minimax(
     }
 }
 
-export async function calculateBotAction(currentEngine: GameEngine, botColor: PlayerColor): Promise<GameAction | null> {
-    const depth = gameConfig.botParams.botDifficultyDepth;
+export async function calculateBotAction(
+    currentEngine: GameEngine,
+    botColor: PlayerColor,
+    customDepth?: number
+): Promise<GameAction | null> {
+    const depth = customDepth ?? gameConfig.botParams.botDifficultyDepth;
     const legalActions = currentEngine.getAllLegalActions(currentEngine.getState());
 
     if (legalActions.length === 0) {

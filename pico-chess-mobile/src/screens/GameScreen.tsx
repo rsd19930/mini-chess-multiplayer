@@ -12,6 +12,7 @@ import {
 } from "react-native";
 import { useKeepAwake } from "expo-keep-awake";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import * as Haptics from "expo-haptics";
 import { ChessBoard } from "../components/board/ChessBoard";
 import { defaultTheme } from "../config/themeConfig";
 import { GameEngine } from "../core/GameEngine";
@@ -35,7 +36,7 @@ export const GameScreen: React.FC<GameScreenProps> = ({
   const insets = useSafeAreaInsets();
 
   // Retrieve the passed gamemode (local vs online)
-  const { mode, matchId, localColor } = route.params;
+  const { mode, matchId, localColor, botDepth } = route.params;
 
   // In a real Match flow, we'd pass the local socket/realtime connection
   // and the mapped color down. For testing our UI, we'll assume we are White locally.
@@ -253,7 +254,7 @@ export const GameScreen: React.FC<GameScreenProps> = ({
   // Cleanup abandoned waiting matches on unmount
   React.useEffect(() => {
     return () => {
-      if (mode === "online" && matchId) {
+      if (mode === "online" && matchId && !isPrivateMatch) {
         // If the user leaves the screen (unmounts) while the match is still waiting, abort it.
         // The .eq('status', 'waiting') completely guards against aborting a match that already started active play.
         supabase
@@ -266,7 +267,7 @@ export const GameScreen: React.FC<GameScreenProps> = ({
           });
       }
     };
-  }, [mode, matchId]);
+  }, [mode, matchId, isPrivateMatch]);
 
   // Bot Turn Logic
   React.useEffect(() => {
@@ -290,7 +291,11 @@ export const GameScreen: React.FC<GameScreenProps> = ({
           Math.random() * (gameConfig.botParams.botMaxThinkTimeMs - 2000 + 1),
         ) + 2000;
       const timer = setTimeout(async () => {
-        const action = await calculateBotAction(engine, gameState.turn);
+        const action = await calculateBotAction(
+          engine,
+          gameState.turn,
+          botDepth,
+        );
         if (action) {
           engine.applyAction(action);
           setGameState({ ...engine.getState() });
@@ -332,6 +337,16 @@ export const GameScreen: React.FC<GameScreenProps> = ({
     if (prev && gameState.moveHistory.length > prev.moveHistory.length) {
       const lastMove = gameState.moveHistory[gameState.moveHistory.length - 1];
       const isOpponentMove = gameState.turn === localColor; // If it's NOW localColor's turn, opponent just moved
+
+      if (isOpponentMove && !gameState.isGameOver) {
+        setTimeout(() => {
+          try {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+          } catch (e) {
+            console.warn("Haptic Engine Drop:", e);
+          }
+        }, 50);
+      }
 
       if (gameState.isGameOver) {
         if (gameState.winReason === "Checkmate") {
@@ -427,7 +442,11 @@ export const GameScreen: React.FC<GameScreenProps> = ({
   };
 
   const confirmResign = () => {
-    setGameState(engine.resign("white")); // Assuming hardcoded white for local test
+    const resignColor =
+      mode === "online" && localColor ? localColor : gameState.turn;
+    setGameState(
+      engine.resign(resignColor as "white" | "black", "Resignation"),
+    );
     setResignModalVisible(false);
     AudioService.playGameEnd();
   };
@@ -636,7 +655,7 @@ export const GameScreen: React.FC<GameScreenProps> = ({
                 onPress={() => setCustomAlert(null)}
               >
                 <Text style={styles.customAlertBtnText}>
-                  {customAlert?.buttonText || "Great!"}
+                  {customAlert?.buttonText || "Okay"}
                 </Text>
               </TouchableOpacity>
             </View>
