@@ -85,54 +85,42 @@ export async function scheduleDailyReminders(
       body = `Claim your daily login bonus of ${economyConfig?.daily_login_bonus || 500} coins now.`;
     }
 
-    if (isBrandNewUser) {
-      // Scenario A: Brand new user, just repeat daily at 9 PM
-      await Notifications.scheduleNotificationAsync({
-        content: { title, body },
-        trigger: {
-          hour: 21,
-          minute: 0,
-          repeats: true,
-        } as any,
-      });
-    } else {
-      // Scenario B: Existing user, 14-day rolling schedule to skip days already claimed
-      const now = new Date();
-      const lastClaimed = lastLoginBonusIsoString
-        ? new Date(lastLoginBonusIsoString)
-        : new Date(0);
-      const hasClaimedToday = lastClaimed.toDateString() === now.toDateString();
+    // Execute a unified 14-day rolling schedule completely bypassing Android 14 exact alarm crashes
+    const now = new Date();
+    const lastClaimed = lastLoginBonusIsoString
+      ? new Date(lastLoginBonusIsoString)
+      : new Date(0);
+    const hasClaimedToday = lastClaimed.toDateString() === now.toDateString();
 
-      for (let i = 0; i < 14; i++) {
-        const triggerDate = new Date();
-        triggerDate.setDate(triggerDate.getDate() + i);
-        triggerDate.setHours(21, 0, 0, 0);
+    for (let i = 0; i < 14; i++) {
+      const triggerDate = new Date();
+      triggerDate.setDate(triggerDate.getDate() + i);
+      triggerDate.setHours(21, 0, 0, 0);
 
-        // Skip scheduling if it's already past 9 PM for this specific day
-        if (triggerDate.getTime() <= now.getTime()) {
-          continue;
-        }
+      // Skip scheduling if it's already past 9 PM for this specific day
+      if (triggerDate.getTime() <= now.getTime()) {
+        continue;
+      }
 
-        // If it's today and they already claimed, skip it
-        if (i === 0 && hasClaimedToday) {
-          continue;
-        }
+      // If it's today and they already claimed (new users default false), skip it
+      if (i === 0 && hasClaimedToday) {
+        continue;
+      }
 
-        try {
-          await Notifications.scheduleNotificationAsync({
-            content: { title, body },
-            trigger: {
-              year: triggerDate.getFullYear(),
-              month: triggerDate.getMonth() + 1, // Expo months are 1-12
-              day: triggerDate.getDate(),
-              hour: 21,
-              minute: 0,
-              repeats: false,
-            } as any,
-          });
-        } catch (e) {
-          console.warn("Failed to schedule day", i, e);
-        }
+      try {
+        await Notifications.scheduleNotificationAsync({
+          content: { title, body },
+          trigger: {
+            year: triggerDate.getFullYear(),
+            month: triggerDate.getMonth() + 1, // Expo months are 1-12
+            day: triggerDate.getDate(),
+            hour: 21,
+            minute: 0,
+            repeats: false,
+          } as any,
+        });
+      } catch (e) {
+        console.warn("Failed to schedule day", i, e);
       }
     }
   } catch (e: any) {

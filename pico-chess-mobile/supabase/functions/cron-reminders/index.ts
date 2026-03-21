@@ -74,8 +74,8 @@ serve(async (req: Request) => {
                 if (player?.expo_push_token) {
                     await sendPushNotification(
                         player.expo_push_token,
-                        "Invite your friend to play again",
-                        "The game is waiting."
+                        "Nudge your friend to join in",
+                        "The Pico Chess game room is waiting."
                     );
                 }
 
@@ -129,8 +129,8 @@ serve(async (req: Request) => {
                     if (player?.expo_push_token) {
                         await sendPushNotification(
                             player.expo_push_token,
-                            "Lady Luck is shining now",
-                            "Play Pico Chess again."
+                            "Luck is on your now",
+                            "Play Pico Chess and win this time."
                         );
                     }
                 }
