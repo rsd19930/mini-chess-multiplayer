@@ -798,7 +798,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
                   opacity: 0.7,
                 },
               ]}
-              onPress={() => setPveState(1)}
+              onPress={() => checkTutorial(() => setPveState(1))}
               disabled={isSearchingOnline || isCreatingPrivateMatch}
             >
               <Text style={styles.menuButtonText}>Play with PicoBot</Text>

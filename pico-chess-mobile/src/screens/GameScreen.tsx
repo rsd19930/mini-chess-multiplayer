@@ -60,6 +60,8 @@ export const GameScreen: React.FC<GameScreenProps> = ({
   const [matchmakingCountdown, setMatchmakingCountdown] = useState(
     gameConfig.timers.matchmakingTimeoutMs / 1000,
   );
+  const lastTurnRef = React.useRef<"white" | "black" | null>(null);
+  const tenSecWarningPlayedRef = React.useRef(false);
 
   // Timer logic based on absolute last_move_timestamp
   React.useEffect(() => {
@@ -86,8 +88,26 @@ export const GameScreen: React.FC<GameScreenProps> = ({
 
       const elapsed = now - lastMove;
       const remaining = Math.max(0, gameConfig.timers.turnTimeMs - elapsed);
+      const remainingSeconds = Math.ceil(remaining / 1000);
 
-      setTimeLeft(Math.ceil(remaining / 1000));
+      setTimeLeft(remainingSeconds);
+
+      // Track turn changes to reset the 10-second warning flag
+      if (lastTurnRef.current !== currentState.turn) {
+        lastTurnRef.current = currentState.turn;
+        tenSecWarningPlayedRef.current = false;
+      }
+
+      // Play the "10 Seconds Remaining" warning strictly for the local player
+      if (
+        currentState.turn === localColor &&
+        remainingSeconds === 10 &&
+        !tenSecWarningPlayedRef.current &&
+        remaining > 0
+      ) {
+        tenSecWarningPlayedRef.current = true;
+        AudioService.playTenSecsWarning();
+      }
 
       if (remaining <= 0) {
         // Time's up!

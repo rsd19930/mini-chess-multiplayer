@@ -1,14 +1,20 @@
-import React from 'react';
-import { NavigationContainer } from '@react-navigation/native';
-import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import * as Linking from 'expo-linking';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Alert } from 'react-native';
-import { HomeScreen } from './src/screens/HomeScreen';
-import { GameScreen } from './src/screens/GameScreen';
-import { RootStackParamList } from './src/types/navigation';
-import * as Notifications from 'expo-notifications';
-import { useFonts, PublicSans_400Regular, PublicSans_700Bold, PublicSans_900Black } from '@expo-google-fonts/public-sans';
+import React from "react";
+import { NavigationContainer } from "@react-navigation/native";
+import { createNativeStackNavigator } from "@react-navigation/native-stack";
+import * as Linking from "expo-linking";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { Alert } from "react-native";
+import { HomeScreen } from "./src/screens/HomeScreen";
+import { GameScreen } from "./src/screens/GameScreen";
+import { RootStackParamList } from "./src/types/navigation";
+import * as Notifications from "expo-notifications";
+import {
+  useFonts,
+  PublicSans_400Regular,
+  PublicSans_700Bold,
+  PublicSans_900Black,
+} from "@expo-google-fonts/public-sans";
+import * as ExpoInAppUpdates from "expo-in-app-updates";
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -22,7 +28,7 @@ Notifications.setNotificationHandler({
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
-const prefix = Linking.createURL('/');
+const prefix = Linking.createURL("/");
 
 export default function App() {
   const [fontsLoaded] = useFonts({
@@ -31,11 +37,22 @@ export default function App() {
     PublicSans_900Black,
   });
 
+  React.useEffect(() => {
+    const checkUpdate = async () => {
+      try {
+        await ExpoInAppUpdates.checkAndStartUpdate();
+      } catch (e) {
+        console.log("In-App Update check bypassed or unavailable in dev:", e);
+      }
+    };
+    checkUpdate();
+  }, []);
+
   const linking = {
-    prefixes: [prefix, 'picochess://'],
+    prefixes: [prefix, "picochess://"],
     config: {
       screens: {
-        Home: '*', // Force all unrecognized (or all) deep links to land on Home
+        Home: "*", // Force all unrecognized (or all) deep links to land on Home
       },
     },
     async getInitialURL() {
@@ -53,7 +70,7 @@ export default function App() {
         if (parsedUrl) listener(parsedUrl);
       };
 
-      const subscription = Linking.addEventListener('url', onReceiveURL);
+      const subscription = Linking.addEventListener("url", onReceiveURL);
       return () => {
         subscription.remove();
       };
@@ -63,21 +80,26 @@ export default function App() {
   const handleDeepLink = (url: string) => {
     try {
       // Save the raw URL immediately so we can view it on the Home Screen
-      AsyncStorage.setItem('debug_raw_url', url).catch(() => { });
+      AsyncStorage.setItem("debug_raw_url", url).catch(() => {});
 
-      if (url && url.includes('room/')) {
+      if (url && url.includes("room/")) {
         // Raw string extraction to bypass any Expo parser quirks
-        const pathAfterRoom = url.split('room/')[1];
-        const matchId = pathAfterRoom?.split('?')[0]?.split('/')[0];
-        const referrerId = url.includes('ref=') ? url.split('ref=')[1]?.split('&')[0] : null;
+        const pathAfterRoom = url.split("room/")[1];
+        const matchId = pathAfterRoom?.split("?")[0]?.split("/")[0];
+        const referrerId = url.includes("ref=")
+          ? url.split("ref=")[1]?.split("&")[0]
+          : null;
 
         if (matchId) {
           // Cache the parsed data for HomeScreen to process
-          AsyncStorage.setItem('pending_referral', JSON.stringify({
-            matchId,
-            referrerId,
-            timestamp: Date.now()
-          })).catch(console.error);
+          AsyncStorage.setItem(
+            "pending_referral",
+            JSON.stringify({
+              matchId,
+              referrerId,
+              timestamp: Date.now(),
+            }),
+          ).catch(console.error);
 
           // Return null to halt React Navigation auto-routing
           return null;
