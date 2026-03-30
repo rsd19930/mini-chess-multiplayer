@@ -129,7 +129,7 @@ serve(async (req: Request) => {
                     if (player?.expo_push_token) {
                         await sendPushNotification(
                             player.expo_push_token,
-                            "Luck is on your now",
+                            "Luck is on your side now",
                             "Play Pico Chess and win this time."
                         );
                     }

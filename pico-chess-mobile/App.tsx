@@ -6,6 +6,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Alert } from "react-native";
 import { HomeScreen } from "./src/screens/HomeScreen";
 import { GameScreen } from "./src/screens/GameScreen";
+import { ProfileScreen } from "./src/screens/ProfileScreen";
 import { RootStackParamList } from "./src/types/navigation";
 import * as Notifications from "expo-notifications";
 import {
@@ -80,7 +81,7 @@ export default function App() {
   const handleDeepLink = (url: string) => {
     try {
       // Save the raw URL immediately so we can view it on the Home Screen
-      AsyncStorage.setItem("debug_raw_url", url).catch(() => {});
+      AsyncStorage.setItem("debug_raw_url", url).catch(() => { });
 
       if (url && url.includes("room/")) {
         // Raw string extraction to bypass any Expo parser quirks
@@ -126,6 +127,7 @@ export default function App() {
       >
         <Stack.Screen name="Home" component={HomeScreen} />
         <Stack.Screen name="Game" component={GameScreen} />
+        <Stack.Screen name="Profile" component={ProfileScreen} />
       </Stack.Navigator>
     </NavigationContainer>
   );
