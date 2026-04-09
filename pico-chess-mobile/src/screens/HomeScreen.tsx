@@ -22,8 +22,10 @@ import { GameEngine } from "../core/GameEngine";
 import * as WebBrowser from "expo-web-browser";
 import { makeRedirectUri } from "expo-auth-session";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import { NativeStackScreenProps } from "@react-navigation/native-stack";
+import { useFocusEffect } from "@react-navigation/native";
 import { RootStackParamList } from "../types/navigation";
+import * as StoreReview from "expo-store-review";
 import { defaultTheme } from "../config/themeConfig";
 import { gameConfig } from "../config/gameConfig";
 import Purchases from "react-native-purchases";
@@ -34,14 +36,7 @@ import {
 import { AudioService } from "../services/AudioService";
 import { getTierForElo } from "../utils/elo";
 
-type HomeScreenNavigationProp = NativeStackNavigationProp<
-    RootStackParamList,
-    "Home"
->;
-
-interface HomeScreenProps {
-    navigation: HomeScreenNavigationProp;
-}
+type HomeScreenProps = NativeStackScreenProps<RootStackParamList, "Home">;
 
 const extractTokens = (url: string) => {
     const queryParams: Record<string, string> = {};
@@ -57,7 +52,31 @@ const extractTokens = (url: string) => {
 
 WebBrowser.maybeCompleteAuthSession();
 
-export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
+export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation, route }) => {
+    // ---------------------------------------------------------------------------
+    // STORE REVIEW TRANSIENT TRIGGER MECHANISM
+    // ---------------------------------------------------------------------------
+    useFocusEffect(
+        React.useCallback(() => {
+            const checkStoreReview = async () => {
+                if (route.params?.triggerReview) {
+                    try {
+                        const isAvailable = await StoreReview.isAvailableAsync();
+                        if (isAvailable) {
+                            await StoreReview.requestReview();
+                            await AsyncStorage.setItem("last_review_prompt_date", Date.now().toString());
+                        }
+                    } catch (e) {
+                        console.warn("Failed to natively request store review", e);
+                    } finally {
+                        // Strictly clear the RAM payload preventing cold-boot repeats
+                        navigation.setParams({ triggerReview: undefined });
+                    }
+                }
+            };
+            checkStoreReview();
+        }, [route.params?.triggerReview, navigation])
+    );
     const insets = useSafeAreaInsets();
     const [session, setSession] = useState<any>(null);
     const [isSearchingOnline, setIsSearchingOnline] = useState(false);

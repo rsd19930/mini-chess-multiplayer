@@ -25,6 +25,7 @@ import { RootStackParamList } from "../types/navigation";
 import { supabase } from "../services/supabase";
 import { gameConfig } from "../config/gameConfig";
 import { MatchmakingService } from "../services/MatchmakingService";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 type GameScreenProps = NativeStackScreenProps<RootStackParamList, "Game">;
 
@@ -57,6 +58,9 @@ export const GameScreen: React.FC<GameScreenProps> = ({
         message: string;
         buttonText?: string;
     } | null>(null);
+
+    // Track Store Review Trigger constraint without re-rendering
+    const triggerReviewRef = React.useRef(false);
 
     // New Async Reward States
     const [eloResult, setEloResult] = useState<
@@ -432,6 +436,30 @@ export const GameScreen: React.FC<GameScreenProps> = ({
                     .eq("id", matchId);
 
                 if (!isPrivateMatch) {
+                    // STORE REVIEW PIPELINE LOGIC (Win Streak Tracking)
+                    if (gameState.winner === localColor) {
+                        try {
+                            const streakStr = await AsyncStorage.getItem("consecutive_wins");
+                            const streak = (streakStr ? parseInt(streakStr, 10) : 0) + 1;
+                            await AsyncStorage.setItem("consecutive_wins", streak.toString());
+
+                            if (streak >= 3) {
+                                const lastPromptDate = await AsyncStorage.getItem("last_review_prompt_date");
+                                const NINTEY_DAYS_MS = 90 * 24 * 60 * 60 * 1000;
+                                const isAllowed = !lastPromptDate || (Date.now() - parseInt(lastPromptDate, 10)) > NINTEY_DAYS_MS;
+
+                                if (isAllowed) {
+                                    triggerReviewRef.current = true;
+                                }
+                            }
+                        } catch (e) { console.warn("Failed tracking streak", e); }
+                    } else if (gameState.winner !== null && gameState.winner !== undefined) {
+                        // If it's a draw, or opponent wins
+                        try {
+                            await AsyncStorage.setItem("consecutive_wins", "0");
+                        } catch (e) { }
+                    }
+
                     // Immediately trigger UI loader
                     setEloResult("loading");
 
@@ -544,17 +572,17 @@ export const GameScreen: React.FC<GameScreenProps> = ({
                         title: "Matchmaking Error",
                         message: error.message || "Failed to find a match.",
                     });
-                    navigation.navigate("Home");
+                    navigation.navigate("Home", { triggerReview: triggerReviewRef.current });
                 }
             } else {
                 setIsRematching(false);
-                navigation.navigate("Home");
+                navigation.navigate("Home", { triggerReview: triggerReviewRef.current });
             }
         }
     };
 
     const handleBackToHome = () => {
-        navigation.navigate("Home");
+        navigation.navigate("Home", { triggerReview: triggerReviewRef.current });
     };
 
     return (
