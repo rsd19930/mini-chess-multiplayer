@@ -15,7 +15,6 @@ import {
   PublicSans_700Bold,
   PublicSans_900Black,
 } from "@expo-google-fonts/public-sans";
-import * as ExpoInAppUpdates from "expo-in-app-updates";
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -37,17 +36,6 @@ export default function App() {
     PublicSans_700Bold,
     PublicSans_900Black,
   });
-
-  React.useEffect(() => {
-    const checkUpdate = async () => {
-      try {
-        await ExpoInAppUpdates.checkAndStartUpdate();
-      } catch (e) {
-        console.log("In-App Update check bypassed or unavailable in dev:", e);
-      }
-    };
-    checkUpdate();
-  }, []);
 
   const linking = {
     prefixes: [prefix, "picochess://"],
