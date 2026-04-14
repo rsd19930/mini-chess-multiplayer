@@ -58,20 +58,19 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation, route }) => 
     // ---------------------------------------------------------------------------
     useFocusEffect(
         React.useCallback(() => {
+            if (!route.params?.triggerReview) return;
+
             const checkStoreReview = async () => {
-                if (route.params?.triggerReview) {
-                    try {
-                        const isAvailable = await StoreReview.isAvailableAsync();
-                        if (isAvailable) {
-                            await StoreReview.requestReview();
-                            await AsyncStorage.setItem("last_review_prompt_date", Date.now().toString());
-                        }
-                    } catch (e) {
-                        console.warn("Failed to natively request store review", e);
-                    } finally {
-                        // Strictly clear the RAM payload preventing cold-boot repeats
-                        navigation.setParams({ triggerReview: undefined });
+                // Always clear the transient flag first to prevent double-firing
+                navigation.setParams({ triggerReview: undefined });
+                try {
+                    const isAvailable = await StoreReview.isAvailableAsync();
+                    if (isAvailable) {
+                        await StoreReview.requestReview();
+                        await AsyncStorage.setItem("last_review_prompt_date", Date.now().toString());
                     }
+                } catch (e) {
+                    console.warn("Failed to natively request store review", e);
                 }
             };
             checkStoreReview();
