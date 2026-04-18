@@ -46,9 +46,3 @@ yarn-error.*
 build-*.apk
 build-*.aab
 
-# EXPLICIT INCLUSIONS FOR EAS BUILD
-# These files are intentionally ignored by Git for security, but MUST be forced
-# into the EAS Cloud compilation bundle so process.env bindings resolve correctly!
-!.env
-!.env.*
-!google-services.json

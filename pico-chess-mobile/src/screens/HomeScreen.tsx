@@ -22,10 +22,8 @@ import { GameEngine } from "../core/GameEngine";
 import * as WebBrowser from "expo-web-browser";
 import { makeRedirectUri } from "expo-auth-session";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { NativeStackScreenProps } from "@react-navigation/native-stack";
-import { useFocusEffect } from "@react-navigation/native";
+import { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { RootStackParamList } from "../types/navigation";
-import * as StoreReview from "expo-store-review";
 import { defaultTheme } from "../config/themeConfig";
 import { gameConfig } from "../config/gameConfig";
 import Purchases from "react-native-purchases";
@@ -36,7 +34,14 @@ import {
 import { AudioService } from "../services/AudioService";
 import { getTierForElo } from "../utils/elo";
 
-type HomeScreenProps = NativeStackScreenProps<RootStackParamList, "Home">;
+type HomeScreenNavigationProp = NativeStackNavigationProp<
+    RootStackParamList,
+    "Home"
+>;
+
+interface HomeScreenProps {
+    navigation: HomeScreenNavigationProp;
+}
 
 const extractTokens = (url: string) => {
     const queryParams: Record<string, string> = {};
@@ -52,30 +57,7 @@ const extractTokens = (url: string) => {
 
 WebBrowser.maybeCompleteAuthSession();
 
-export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation, route }) => {
-    // ---------------------------------------------------------------------------
-    // STORE REVIEW TRANSIENT TRIGGER MECHANISM
-    // ---------------------------------------------------------------------------
-    useFocusEffect(
-        React.useCallback(() => {
-            if (!route.params?.triggerReview) return;
-
-            const checkStoreReview = async () => {
-                // Always clear the transient flag first to prevent double-firing
-                navigation.setParams({ triggerReview: undefined });
-                try {
-                    const isAvailable = await StoreReview.isAvailableAsync();
-                    if (isAvailable) {
-                        await StoreReview.requestReview();
-                        await AsyncStorage.setItem("last_review_prompt_date", Date.now().toString());
-                    }
-                } catch (e) {
-                    console.warn("Failed to natively request store review", e);
-                }
-            };
-            checkStoreReview();
-        }, [route.params?.triggerReview, navigation])
-    );
+export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
     const insets = useSafeAreaInsets();
     const [session, setSession] = useState<any>(null);
     const [isSearchingOnline, setIsSearchingOnline] = useState(false);
