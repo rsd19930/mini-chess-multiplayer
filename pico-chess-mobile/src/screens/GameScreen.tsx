@@ -69,6 +69,19 @@ export const GameScreen: React.FC<GameScreenProps> = ({
     );
     const lastTurnRef = React.useRef<"white" | "black" | null>(null);
     const tenSecWarningPlayedRef = React.useRef(false);
+    const initialRatingRef = React.useRef<number | null>(null);
+
+    React.useEffect(() => {
+        if (mode === "online" && !initialRatingRef.current) {
+            supabase.auth.getUser().then(({ data: { user } }) => {
+                if (user) {
+                    supabase.from("players").select("rating").eq("id", user.id).single().then(({ data }) => {
+                        if (data && !initialRatingRef.current) initialRatingRef.current = data.rating;
+                    });
+                }
+            });
+        }
+    }, [mode]);
 
     // Timer logic based on absolute last_move_timestamp
     React.useEffect(() => {
@@ -174,7 +187,7 @@ export const GameScreen: React.FC<GameScreenProps> = ({
         // Fetch initial status
         supabase
             .from("matches")
-            .select("status, player_white, player_black, is_private, started_at")
+            .select("status, player_white, player_black, is_private, started_at, game_state")
             .eq("id", matchId)
             .single()
             .then(({ data }) => {
@@ -186,6 +199,12 @@ export const GameScreen: React.FC<GameScreenProps> = ({
                     const oppId =
                         localColor === "white" ? data.player_black : data.player_white;
                     setOpponentId(oppId);
+
+                    if (data.game_state) {
+                        setGameState(data.game_state);
+                        engine.setState(data.game_state);
+                        prevGameStateRef.current = data.game_state as GameState;
+                    }
                 }
             });
 
@@ -280,10 +299,15 @@ export const GameScreen: React.FC<GameScreenProps> = ({
         return () => clearInterval(interval);
     }, [mode, matchStatus]);
 
+    const isPrivateMatchRef = React.useRef(isPrivateMatch);
+    React.useEffect(() => {
+        isPrivateMatchRef.current = isPrivateMatch;
+    }, [isPrivateMatch]);
+
     // Cleanup abandoned waiting matches on unmount
     React.useEffect(() => {
         return () => {
-            if (mode === "online" && matchId && !isPrivateMatch) {
+            if (mode === "online" && matchId && !isPrivateMatchRef.current) {
                 // If the user leaves the screen (unmounts) while the match is still waiting, abort it.
                 // The .eq('status', 'waiting') completely guards against aborting a match that already started active play.
                 supabase
@@ -296,7 +320,7 @@ export const GameScreen: React.FC<GameScreenProps> = ({
                     });
             }
         };
-    }, [mode, matchId, isPrivateMatch]);
+    }, [mode, matchId]);
 
     // Bot Turn Logic
     React.useEffect(() => {
@@ -458,8 +482,24 @@ export const GameScreen: React.FC<GameScreenProps> = ({
                             change: eloData.elo_change,
                             newElo: eloData.new_elo,
                         });
+                    } else if (!eloError && eloData?.already_processed && myId) {
+                        // Race condition caught: The other client already triggered the RPC.
+                        // We safely fetch the newly updated native rating to render the UI properly!
+                        const { data: playerData } = await supabase
+                            .from("players")
+                            .select("rating")
+                            .eq("id", myId)
+                            .single();
+                        if (playerData && initialRatingRef.current !== null) {
+                            setEloResult({
+                                change: playerData.rating - initialRatingRef.current, // Exact delta calculation
+                                newElo: playerData.rating,
+                            });
+                        } else {
+                            setEloResult(null);
+                        }
                     } else {
-                        setEloResult(null); // Fallback if race-condition caught
+                        setEloResult(null); // Complete fallback
                     }
 
                     // 3. Fire Coins RPC if Victory

@@ -597,7 +597,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
             // Share the deep link via the GitHub Pages redirect
             const deepLink = `https://rsd19930.github.io/pico-invite/?room=${matchData.id}&ref=${session.user.id}`;
             await Share.share({
-                message: `I challenge you to a game of Pico Chess! ♟️\n1. Download the game from the Play Store.\n2. Tap here to join my lobby: ${deepLink} \n(New players get a bonus!)`,
+                message: `I challenge you to a game of Pico Chess! ♟️\n1. Download the game from the Play Store: https://play.google.com/store/apps/details?id=com.picochess.app\n2. Tap here to join my lobby: ${deepLink} \n(New players get a bonus!)`,
             });
 
             setIsCreatingPrivateMatch(false);
