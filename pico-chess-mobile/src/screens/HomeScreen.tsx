@@ -469,6 +469,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ route, navigation }) => 
 
         const botUuid = "00000000-0000-0000-0000-000000000000";
         const nowIso = new Date().toISOString();
+        const initialEngineState = new GameEngine().getState();
 
         const { data: matchData, error: matchError } = await supabase
             .from("matches")
@@ -479,6 +480,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ route, navigation }) => 
                     status: "active",
                     is_private: false,
                     started_at: nowIso,
+                    game_state: initialEngineState,
                 },
             ])
             .select()
