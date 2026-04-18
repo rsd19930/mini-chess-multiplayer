@@ -569,22 +569,109 @@ export const GameScreen: React.FC<GameScreenProps> = ({
             } = await supabase.auth.getSession();
             if (session) {
                 try {
-                    const result = await MatchmakingService.findOrCreateMatch(
-                        session.user.id,
-                    );
-                    setIsRematching(false);
-                    navigation.replace("Game", {
-                        mode: "online",
-                        matchId: result.matchId,
-                        localColor: result.color,
-                    });
+                    // Fetch current user coin balance absolutely accurately
+                    const { data: player } = await supabase
+                        .from("players")
+                        .select("coins")
+                        .eq("id", session.user.id)
+                        .single();
+                    const balance = player?.coins || 0;
+
+                    if (botDepth !== undefined) {
+                        // Play With Bot Rematch
+                        const requiredCoins = botDepth === 1 ? 0 : botDepth === 2 ? 50 : 100;
+                        if (balance < requiredCoins) {
+                            setIsRematching(false);
+                            navigation.navigate("Home", {
+                                alertTitle: "Insufficient Coins",
+                                alertMessage: `You need 🪙 ${requiredCoins} to play at this difficulty.`,
+                            });
+                            return;
+                        }
+
+                        const botUuid = "00000000-0000-0000-0000-000000000000";
+                        const nowIso = new Date().toISOString();
+
+                        const { data: matchData, error: matchError } = await supabase
+                            .from("matches")
+                            .insert([
+                                {
+                                    player_white: localColor === "white" ? session.user.id : botUuid,
+                                    player_black: localColor === "black" ? session.user.id : botUuid,
+                                    status: "active",
+                                    is_private: false,
+                                    started_at: nowIso,
+                                },
+                            ])
+                            .select()
+                            .single();
+
+                        if (matchError || !matchData) throw matchError;
+
+                        const { data: rpcData, error: rpcError } = await supabase.rpc(
+                            "pay_bot_fee",
+                            { p_match_id: matchData.id, p_difficulty: botDepth }
+                        );
+
+                        if (rpcError || rpcData?.success === false) {
+                            setIsRematching(false);
+                            navigation.navigate("Home", {
+                                alertTitle: "Error",
+                                alertMessage: rpcError?.message || rpcData?.message || "Failed to process entry fee.",
+                            });
+                            return;
+                        }
+
+                        setIsRematching(false);
+                        navigation.replace("Game", {
+                            mode: "online",
+                            matchId: matchData.id,
+                            localColor: localColor,
+                            botDepth: botDepth,
+                        });
+                    } else {
+                        // Play Online or Play With Friend Rematch (both funnel to standard matchmaking)
+                        const reqCoins = gameConfig.economyParams.matchFee;
+                        if (balance < reqCoins) {
+                            setIsRematching(false);
+                            navigation.navigate("Home", {
+                                alertTitle: "Not enough coins!",
+                                alertMessage: `You need ${reqCoins} coins to play online.`,
+                            });
+                            return;
+                        }
+
+                        const result = await MatchmakingService.findOrCreateMatch(
+                            session.user.id,
+                        );
+
+                        const { data: rpcData, error: rpcError } = await supabase.rpc(
+                            "pay_entry_fee",
+                            { p_match_id: result.matchId }
+                        );
+
+                        if (rpcError || rpcData?.success === false) {
+                            setIsRematching(false);
+                            navigation.navigate("Home", {
+                                alertTitle: "Error",
+                                alertMessage: rpcError?.message || rpcData?.message || "Failed to pay entry fee.",
+                            });
+                            return;
+                        }
+
+                        setIsRematching(false);
+                        navigation.replace("Game", {
+                            mode: "online",
+                            matchId: result.matchId,
+                            localColor: result.color,
+                        });
+                    }
                 } catch (error: any) {
                     setIsRematching(false);
-                    setCustomAlert({
-                        title: "Matchmaking Error",
-                        message: error.message || "Failed to find a match.",
+                    navigation.navigate("Home", {
+                        alertTitle: "Matchmaking Error",
+                        alertMessage: error.message || "Failed to start match.",
                     });
-                    navigation.navigate("Home");
                 }
             } else {
                 setIsRematching(false);

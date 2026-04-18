@@ -22,7 +22,7 @@ import { GameEngine } from "../core/GameEngine";
 import * as WebBrowser from "expo-web-browser";
 import { makeRedirectUri } from "expo-auth-session";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { RootStackParamList } from "../types/navigation";
 import { defaultTheme } from "../config/themeConfig";
 import { gameConfig } from "../config/gameConfig";
@@ -34,14 +34,7 @@ import {
 import { AudioService } from "../services/AudioService";
 import { getTierForElo } from "../utils/elo";
 
-type HomeScreenNavigationProp = NativeStackNavigationProp<
-    RootStackParamList,
-    "Home"
->;
-
-interface HomeScreenProps {
-    navigation: HomeScreenNavigationProp;
-}
+type HomeScreenProps = NativeStackScreenProps<RootStackParamList, "Home">;
 
 const extractTokens = (url: string) => {
     const queryParams: Record<string, string> = {};
@@ -57,7 +50,7 @@ const extractTokens = (url: string) => {
 
 WebBrowser.maybeCompleteAuthSession();
 
-export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
+export const HomeScreen: React.FC<HomeScreenProps> = ({ route, navigation }) => {
     const insets = useSafeAreaInsets();
     const [session, setSession] = useState<any>(null);
     const [isSearchingOnline, setIsSearchingOnline] = useState(false);
@@ -95,6 +88,17 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
 
     const [storePackage, setStorePackage] = useState<any>(null);
     const [localPushToken, setLocalPushToken] = useState<string | null>(null);
+
+    useEffect(() => {
+        if (route.params?.alertTitle && route.params?.alertMessage) {
+            setCustomAlert({
+                title: route.params.alertTitle,
+                message: route.params.alertMessage,
+                buttonText: "Okay",
+            });
+            navigation.setParams({ alertTitle: undefined, alertMessage: undefined });
+        }
+    }, [route.params?.alertTitle, route.params?.alertMessage, navigation]);
 
     useEffect(() => {
         const syncPushToken = async () => {
@@ -597,7 +601,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
             // Share the deep link via the GitHub Pages redirect
             const deepLink = `https://rsd19930.github.io/pico-invite/?room=${matchData.id}&ref=${session.user.id}`;
             await Share.share({
-                message: `I challenge you to a game of Pico Chess! ♟️\n1. Download the game from the Play Store: https://play.google.com/store/apps/details?id=com.picochess.app\n2. Tap here to join my lobby: ${deepLink} \n(New players get a bonus!)`,
+                message: `I challenge you to a game of Pico Chess! ♟️\n1. Download the game from Play Store: https://play.google.com/store/apps/details?id=com.picochess.app\n2. Tap here to join my game room: ${deepLink} \n(New players get a bonus!)`,
             });
 
             setIsCreatingPrivateMatch(false);
