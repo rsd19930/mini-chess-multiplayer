@@ -1,6 +1,6 @@
 <div align="center">
   <h1>Pico Chess ♟️</h1>
-  <p><i>A lightning-fast, 6x6 multiplayer chess variant designed for the casual mobile tactician.</i></p>
+  <p><i>A lightning-fast, 6x6 multiplayer chess variant designed for the casual chess player.</i></p>
 
   <div>
     <img src="https://img.shields.io/badge/React_Native-20232A?style=for-the-badge&logo=react&logoColor=61DAFB" alt="React Native" />
