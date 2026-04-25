@@ -30,6 +30,8 @@ import Purchases from "react-native-purchases";
 import {
     registerForPushNotificationsAsync,
     scheduleDailyReminders,
+    scheduleSignupReminder,
+    cancelSignupReminder,
 } from "../utils/notifications";
 import { AudioService } from "../services/AudioService";
 import { getTierForElo } from "../utils/elo";
@@ -112,6 +114,16 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ route, navigation }) => 
                             .eq("id", session.user.id);
                         setLocalPushToken(token);
                     }
+                    // Stamp IANA timezone so server-side cron can apply per-tz quiet hours / windows.
+                    const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+                    if (timezone) {
+                        await supabase
+                            .from("players")
+                            .update({ timezone })
+                            .eq("id", session.user.id);
+                    }
+                    // User has signed in — cancel the pre-signup local reminder if it was scheduled.
+                    await cancelSignupReminder();
                 } catch (error) {
                     console.error("Failed to sync push token:", error);
                 }
@@ -270,15 +282,11 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ route, navigation }) => 
             const userId = activeSession?.user?.id;
 
             if (!userId) {
-                // Guest mode fallbacks
+                // Guest mode: schedule a single inexact one-shot pre-signup reminder.
+                // Replaces the old 14-day calendar-trigger schedule which silently failed on Android 14+.
                 if (mounted) {
                     try {
-                        const { data: configData } = await supabase
-                            .from("economy_config")
-                            .select("*")
-                            .eq("id", 1)
-                            .single();
-                        await scheduleDailyReminders(false, configData);
+                        await scheduleSignupReminder();
                     } catch (e) { }
                 }
                 return;

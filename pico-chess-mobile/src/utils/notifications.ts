@@ -57,6 +57,51 @@ export async function registerForPushNotificationsAsync(): Promise<
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
+const SIGNUP_REMINDER_FLAG = "hasScheduledSignupReminder";
+const SIGNUP_REMINDER_ID_KEY = "signupReminderNotificationId";
+
+// Pre-signup nudge for guest users. Uses an inexact `seconds` trigger because Android 14+
+// silently drops calendar-based triggers without SCHEDULE_EXACT_ALARM.
+export async function scheduleSignupReminder() {
+  try {
+    const alreadyScheduled = await AsyncStorage.getItem(SIGNUP_REMINDER_FLAG);
+    if (alreadyScheduled === "true") return;
+
+    const now = new Date();
+    const target = new Date();
+    target.setHours(21, 0, 0, 0);
+    if (target.getTime() <= now.getTime()) {
+      target.setDate(target.getDate() + 1);
+    }
+    const seconds = Math.max(60, Math.floor((target.getTime() - now.getTime()) / 1000));
+
+    const id = await Notifications.scheduleNotificationAsync({
+      content: {
+        title: "Claim your welcome bonus 🎁",
+        body: "Sign up in 30 seconds and start playing ranked.",
+      },
+      trigger: { seconds, repeats: false } as any,
+    });
+    await AsyncStorage.setItem(SIGNUP_REMINDER_ID_KEY, id);
+    await AsyncStorage.setItem(SIGNUP_REMINDER_FLAG, "true");
+  } catch (e) {
+    console.warn("Failed to schedule signup reminder:", e);
+  }
+}
+
+export async function cancelSignupReminder() {
+  try {
+    const id = await AsyncStorage.getItem(SIGNUP_REMINDER_ID_KEY);
+    if (id) {
+      await Notifications.cancelScheduledNotificationAsync(id);
+    }
+    await AsyncStorage.removeItem(SIGNUP_REMINDER_ID_KEY);
+    await AsyncStorage.removeItem(SIGNUP_REMINDER_FLAG);
+  } catch (e) {
+    console.warn("Failed to cancel signup reminder:", e);
+  }
+}
+
 export async function scheduleDailyReminders(
   isLoggedIn: boolean,
   economyConfig: any,
