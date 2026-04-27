@@ -8,7 +8,7 @@
     <img src="https://img.shields.io/badge/Supabase-3ECF8E?style=for-the-badge&logo=supabase&logoColor=white" alt="Supabase" />
     <img src="https://img.shields.io/badge/Android-3DDC84?style=for-the-badge&logo=android&logoColor=white" alt="Android" />
   </div>
-  
+
   <br />
 
   <a href="https://play.google.com/store/apps/details?id=com.picochess.app">
@@ -19,46 +19,94 @@
 ---
 
 ## 🎯 The Problem
-I am trying to make chess fun for casual players who are looking for a quick, stimulating puzzle during their free time. 
+
+I am trying to make chess fun for casual players who are looking for a quick, stimulating puzzle during their free time.
 
 Regular chess demands a massive time commitment, immense mental energy (an 8x8 board with 32 pieces requires aggressive calculation), and suffers from a rigid starting-moves theory problem where memorization wins over intuition. This creates heavy friction for casual players who just want to instinctively play the game without committing to 30 minutes of deep theory.
 
 ## ⚡ The Solution
-**Pico Chess.** By mathematically condensing the board from 8x8 to 6x6 and reducing the initial piece count, the game reaches its end-state in a fraction of the time with significantly less cognitive load while still feeling intensely intellectual. 
 
-By simplifying the board geometry and introducing the **"Drop Mechanic"** (placing captured pieces back onto the board, heavily inspired by Shogi), it destroys traditional opening-theory stagnation and creates an aggressive, highly tactical midgame that clicks instantly with casual users.
+**Pico Chess.** By condensing the board from 8x8 to 6x6 and reducing the initial piece count to 5 per side, the game reaches its end-state in a fraction of the time with significantly less cognitive load — while still feeling intensely intellectual.
+
+The **"Drop Mechanic"** (placing captured pieces back onto the board, inspired by Shogi) destroys traditional opening-theory stagnation and creates an aggressive, highly tactical midgame that clicks instantly with casual users.
 
 ---
 
-## 🏗️ High-Level System Architecture (HLD)
+## ✨ Features
 
-### 1. Frontend App (React Native)
-The UI is built entirely natively using Expo. It leverages `react-native-reanimated` for smooth 60 FPS piece dropping and interpolations, maintaining a pseudo-3D (2.5D) visual projection mapping natively over SVG vectors to ensure high-performance rendering across all budget mobile devices.
+- **6x6 Crazyhouse variant** — 5 pieces per side (King, Rook, Knight, Bishop, Pawn) and a captured-piece drop mechanic
+- **Online ranked play** — global Elo with progression tiers
+- **PicoBot** — Easy / Medium / Hard, Alpha-Beta minimax with piece-square tables; runs offline
+- **Private friend matches** — share a deep link, play unranked
+- **Coin economy** — daily login bonus, match entry fees, victory rewards, in-app purchases via RevenueCat
+- **Server-side push notifications** — waiting-room nudge, post-loss re-engagement, daily-coin reminder, Elo comeback nudge — all timezone-aware with quiet hours
+- **30-second per-turn timer** — keeps games punchy
+- **Pawn promotion** to Rook / Knight / Bishop (no Queen on a 6x6 board)
+- **In-app review prompt** after a 3-win streak (90-day cooldown)
 
-### 2. Core Chess Validation Engine
-A completely detached, deterministic logical engine (`GameEngine.ts`) built entirely in Vanilla TypeScript. It natively handles all absolute legal move generation, validation, check/checkmate detection, and unique Pocket piece mathematical handling. By isolating the engine entirely from React's render cycles, it runs asynchronously without dropping UI frames.
+---
 
-### 3. Backend & Database Infrastructure (Supabase PostgreSQL)
-The core storage and authoritative source. RLS (Row Level Security) policies intrinsically secure individual player profiles. It leverages highly complex Postgres RPCs (`record_match_result`, `pay_bot_fee`, `pay_entry_fee`) to handle atomic row updates for the global economy (coins), Elo tier ranking variations, and match lifecycle evaluations robustly.
+## 📜 Game Rules
 
-### 4. Game State Sync Engine (Supabase Realtime)
-WebSockets connect the React Native clients seamlessly to designated active `matches` rows inside Postgres. Physical changes to the serialized `game_state` JSONB column are instantly broadcast bi-directionally between peers handling latency bounds efficiently under ~50ms globally.
+Standard chess movement applies — but on a 6x6 board with 5 starting pieces per side, no castling, no en passant, no two-square pawn opening. Captured pieces enter your "hand" and can be dropped on any empty square as your move. Pawns can't be dropped on the promotion rank. Stalemate is a **loss** for the stalemated player. Draws happen only by mutual agreement.
 
-### 5. PicoBot AI Engine
-A highly complex, completely localized AI opponent implementing Alpha-Beta Pruned Minimax algorithms. It operates asynchronously strictly within the JS thread utilizing Piece-Square Tables (PST) and Probabilistic Blunder matrices mapped against algorithmic depth limits (Easy/Medium/Hard) yielding engaging automated resistance without ever touching a single backend server GPU.
+See **[game-rules.md](./game-rules.md)** for the full specification.
+
+---
+
+## 🏗️ Architecture
+
+| Layer | Stack | Role |
+|---|---|---|
+| **App** | React Native + Expo, react-native-reanimated, react-native-svg | UI, animations, SVG piece rendering |
+| **Game engine** | Vanilla TypeScript (`src/core/GameEngine.ts`) | Deterministic move generation, validation, check/mate detection, drop handling — runs identically on both clients |
+| **Database** | Supabase Postgres + RLS | Source of truth: profiles, matches, economy. Idempotent RPCs (`record_match_result`, `pay_bot_fee`, `pay_entry_fee`) handle atomic updates |
+| **Realtime sync** | Supabase Realtime (WebSockets) | Broadcasts the serialized `game_state` JSONB column between peers, sub-50ms latency |
+| **Bot** | `src/core/BotEngine.ts` | Alpha-Beta pruned minimax with piece-square tables and difficulty-tiered depth limits. Fully client-side |
+| **Push** | Supabase Edge Functions + `expo-server-sdk` | Server-side cron-driven notifications |
 
 ---
 
 ## 🧠 Key Design Decisions
 
-### Client-Side Determinism vs. Stateful Backend Processing
-Instead of standing up and paying heavily for expensive specialized backend game servers (like Agones or Colyseus) that constantly compute and validate every single chess move tick by tick, Pico Chess shifts the execution entirely. Both mobile clients run identically deterministic instances of the `GameEngine`. Supabase Realtime simply acts as a blind event relay pipe, vastly simplifying backend infrastructure and drastically cutting server costs while guaranteeing sub-50ms sync globally.
+### Client-side determinism instead of authoritative game servers
 
-### Race Condition Immunity in Economy & Ratings
-Because matches conclude asynchronously across remote devices, it is incredibly common for both clients (e.g., the Winner and a Timeout Loser) to attempt to write final rankings simultaneously back to the database. By designing natively idempotent Supabase Postgres RPCs using locked `already_processed` boolean flags, the backend physically locks the matching transaction upon execution. The exact instant White claims an Elo reward, the database fundamentally seals itself, natively preventing race conditions from duplicating rank inflation or creating negative coin defects.
+Instead of paying for stateful game servers (Agones, Colyseus) that validate every move tick-by-tick, both clients run identical instances of `GameEngine.ts`. Supabase Realtime is a blind event relay. Backend infrastructure stays simple, server cost stays near zero, and global sync stays under ~50ms.
 
-### Asynchronous Push Mechanics Over Client Polling
-Leveraging Edge Functions tightly linked via Postgres Database Webhooks, the backend autonomously observes when an invited player accepts a deeply-linked room invitation asynchronously. It triggers `expo-server-sdk` push tokens strictly server-side, awaking host devices organically with a high-priority notification rather than forcing the React Native application to burn battery by executing constant physical heartbeat loops polling the `matches` API.
+### Race-condition-immune economy and ratings
 
-### Offline & Disconnected Viability
-Because the `BotEngine` and Core Ruleset are bundled directly into the compiled JavaScript payload, playing against PicoBot natively detaches from Realtime WebSockets completely. A user standing in a subway tunnel with zero cell reception can generate an isolated instance of `GameEngine.ts` and play against the hardest bot difficulty intuitively, executing exactly identical logical parameters to a fully networked 5G PvP instance.
+Matches conclude asynchronously across two devices, so it's common for the winner and a timeout-loser to write final state simultaneously. The Postgres RPCs are idempotent — the first call processes, sets an `already_processed` flag, and any second call short-circuits. No duplicate Elo, no negative coin states.
+
+### Push-driven, not poll-driven
+
+A Postgres webhook + Edge Function notifies the host's device via Expo push when an invited player joins their room — instead of forcing the app to poll the `matches` table on a heartbeat. Saves battery, reduces load.
+
+### Offline viability
+
+`BotEngine` and the rules engine ship in the JS bundle. A user with zero connectivity can still play the hardest bot — it executes the same logical paths as a fully-networked PvP match.
+
+---
+
+## 📁 Project Structure
+
+```
+mini-chess-multiplayer/
+├── pico-chess-mobile/         # Expo React Native app
+│   ├── src/
+│   │   ├── core/              # GameEngine + BotEngine
+│   │   ├── screens/           # Home, Game, Profile
+│   │   ├── components/        # Board, pieces, modals
+│   │   ├── services/          # Supabase, matchmaking, audio
+│   │   ├── utils/             # elo, notifications, reviewPrompt
+│   │   └── types/
+│   └── supabase/functions/    # cron-reminders + per-match edge fns
+├── supabase/                  # Top-level edge functions / SQL
+├── game-rules.md
+└── README.md
+```
+
+---
+
+## 📄 License
+
+No `LICENSE` file is present yet. All rights reserved by the author until one is added.
