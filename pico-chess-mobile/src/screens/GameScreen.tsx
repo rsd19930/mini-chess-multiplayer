@@ -25,6 +25,7 @@ import { RootStackParamList } from "../types/navigation";
 import { supabase } from "../services/supabase";
 import { gameConfig } from "../config/gameConfig";
 import { MatchmakingService } from "../services/MatchmakingService";
+import { recordWin, recordLossOrDraw } from "../utils/reviewPrompt";
 
 type GameScreenProps = NativeStackScreenProps<RootStackParamList, "Game">;
 
@@ -47,6 +48,7 @@ export const GameScreen: React.FC<GameScreenProps> = ({
     const [isPrivateMatch, setIsPrivateMatch] = useState(false);
     const [opponentId, setOpponentId] = useState<string | null>(null);
     const [isRematching, setIsRematching] = useState(false);
+    const triggerReviewRef = React.useRef(false);
     const [timeLeft, setTimeLeft] = useState(gameConfig.timers.turnTimeMs / 1000);
     const [matchStartedAt, setMatchStartedAt] = useState<string | null>(null);
     const [localMatchStartTime, setLocalMatchStartTime] = useState<number | null>(
@@ -521,6 +523,14 @@ export const GameScreen: React.FC<GameScreenProps> = ({
                             });
                         }
                     }
+
+                    // 4. Track win-streak for review prompt (PvP + bot, excludes private matches).
+                    if (gameState.winner === localColor) {
+                        const { shouldTrigger } = await recordWin();
+                        if (shouldTrigger) triggerReviewRef.current = true;
+                    } else {
+                        await recordLossOrDraw();
+                    }
                 } else {
                     // Private Match Native Victory Mapping
                     if (gameState.winner === localColor) {
@@ -589,6 +599,7 @@ export const GameScreen: React.FC<GameScreenProps> = ({
                             navigation.navigate("Home", {
                                 alertTitle: "Insufficient Coins",
                                 alertMessage: `You need 🪙 ${requiredCoins} to play at this difficulty.`,
+                                triggerReview: triggerReviewRef.current,
                             });
                             return;
                         }
@@ -624,6 +635,7 @@ export const GameScreen: React.FC<GameScreenProps> = ({
                             navigation.navigate("Home", {
                                 alertTitle: "Error",
                                 alertMessage: rpcError?.message || rpcData?.message || "Failed to process entry fee.",
+                                triggerReview: triggerReviewRef.current,
                             });
                             return;
                         }
@@ -643,6 +655,7 @@ export const GameScreen: React.FC<GameScreenProps> = ({
                             navigation.navigate("Home", {
                                 alertTitle: "Not enough coins!",
                                 alertMessage: `You need ${reqCoins} coins to play online.`,
+                                triggerReview: triggerReviewRef.current,
                             });
                             return;
                         }
@@ -661,6 +674,7 @@ export const GameScreen: React.FC<GameScreenProps> = ({
                             navigation.navigate("Home", {
                                 alertTitle: "Error",
                                 alertMessage: rpcError?.message || rpcData?.message || "Failed to pay entry fee.",
+                                triggerReview: triggerReviewRef.current,
                             });
                             return;
                         }
@@ -677,17 +691,18 @@ export const GameScreen: React.FC<GameScreenProps> = ({
                     navigation.navigate("Home", {
                         alertTitle: "Matchmaking Error",
                         alertMessage: error.message || "Failed to start match.",
+                        triggerReview: triggerReviewRef.current,
                     });
                 }
             } else {
                 setIsRematching(false);
-                navigation.navigate("Home");
+                navigation.navigate("Home", { triggerReview: triggerReviewRef.current });
             }
         }
     };
 
     const handleBackToHome = () => {
-        navigation.navigate("Home");
+        navigation.navigate("Home", { triggerReview: triggerReviewRef.current });
     };
 
     return (

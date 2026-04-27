@@ -33,6 +33,7 @@ import {
     scheduleSignupReminder,
     cancelSignupReminder,
 } from "../utils/notifications";
+import { requestReviewIfDue } from "../utils/reviewPrompt";
 import { AudioService } from "../services/AudioService";
 import { getTierForElo } from "../utils/elo";
 
@@ -101,6 +102,15 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ route, navigation }) => 
             navigation.setParams({ alertTitle: undefined, alertMessage: undefined });
         }
     }, [route.params?.alertTitle, route.params?.alertMessage, navigation]);
+
+    useEffect(() => {
+        if (!route.params?.triggerReview) return;
+        navigation.setParams({ triggerReview: undefined });
+        const t = setTimeout(() => {
+            requestReviewIfDue();
+        }, 600);
+        return () => clearTimeout(t);
+    }, [route.params?.triggerReview, navigation]);
 
     useEffect(() => {
         const syncPushToken = async () => {
