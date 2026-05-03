@@ -48,3 +48,11 @@ export function isInDailyCoinWindow(tz: string, when: Date = new Date()): boolea
   const totalMin = hour * 60 + minute;
   return totalMin >= 20 * 60 + 30 && totalMin < 21 * 60 + 30;
 }
+
+export function isInInactiveReminderWindow(tz: string, when: Date = new Date()): boolean {
+  // 12:30–13:30 local: 1h window centered on 1pm for the inactive-user "your coins are
+  // gathering dust" PN. Mirrors the daily-coin window pattern.
+  const { hour, minute } = getLocalParts(tz, when);
+  const totalMin = hour * 60 + minute;
+  return totalMin >= 12 * 60 + 30 && totalMin < 13 * 60 + 30;
+}

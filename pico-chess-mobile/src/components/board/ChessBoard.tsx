@@ -5,6 +5,7 @@ import {
     TouchableWithoutFeedback,
     Dimensions,
     Text,
+    Image,
 } from "react-native";
 import { GameEngine } from "../../core/GameEngine";
 import {
@@ -24,6 +25,10 @@ import Animated, {
     useAnimatedStyle,
     withSpring,
 } from "react-native-reanimated";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+
+const DROP_TUTORIAL_KEY = "drop_tutorial_games_seen";
+const DROP_TUTORIAL_LIMIT = 2;
 
 const { width } = Dimensions.get("window");
 const BOARD_SIZE = width * 0.9;
@@ -37,6 +42,7 @@ interface ChessBoardProps {
     timeLeft?: number;
     matchStatus?: string;
     opponentName?: string;
+    opponentAvatarUrl?: string | null;
 }
 
 export const ChessBoard: React.FC<ChessBoardProps> = ({
@@ -48,6 +54,7 @@ export const ChessBoard: React.FC<ChessBoardProps> = ({
     timeLeft,
     matchStatus,
     opponentName,
+    opponentAvatarUrl,
 }) => {
     // Init audio
     useEffect(() => {
@@ -58,6 +65,103 @@ export const ChessBoard: React.FC<ChessBoardProps> = ({
     const [selectedPos, setSelectedPos] = useState<Position | null>(null);
     const [selectedPocketPiece, setSelectedPocketPiece] =
         useState<PieceType | null>(null);
+
+    // Transient "Dropped from hand" tooltip shown when the opponent drops a piece.
+    const [dropToast, setDropToast] = useState<{ row: number; col: number } | null>(null);
+
+    // First-2-games "drop captured pieces" tutorial callout.
+    // Shows ONCE per game, only when (a) under the lifetime games-seen cap, (b) it's the
+    // user's turn, and (c) they have ≥1 captured piece in hand — so the prompt actually
+    // makes sense given the board state.
+    const [tutorialEligible, setTutorialEligible] = useState(false);
+    const [showDropTutorial, setShowDropTutorial] = useState(false);
+    const tutorialShownThisGameRef = React.useRef(false);
+    const tutorialShownAtMoveCountRef = React.useRef<number | null>(null);
+    const tutorialIncrementedRef = React.useRef(false);
+
+    // Read AsyncStorage once on mount to determine eligibility for this game.
+    useEffect(() => {
+        let cancelled = false;
+        AsyncStorage.getItem(DROP_TUTORIAL_KEY).then((raw) => {
+            if (cancelled) return;
+            const seen = raw ? parseInt(raw, 10) : 0;
+            if (Number.isFinite(seen) && seen < DROP_TUTORIAL_LIMIT) {
+                setTutorialEligible(true);
+            }
+        });
+        return () => {
+            cancelled = true;
+        };
+    }, []);
+
+    // Show the tutorial the first time all conditions line up in this game.
+    useEffect(() => {
+        if (!tutorialEligible) return;
+        if (tutorialShownThisGameRef.current) return;
+        if (gameState.isGameOver) return;
+        if (gameState.turn !== localColor) return;
+        if ((gameState.pocket[localColor]?.length ?? 0) < 1) return;
+        tutorialShownThisGameRef.current = true;
+        tutorialShownAtMoveCountRef.current = gameState.moveHistory.length;
+        setShowDropTutorial(true);
+    }, [
+        tutorialEligible,
+        gameState.turn,
+        gameState.pocket,
+        gameState.isGameOver,
+        gameState.moveHistory.length,
+        localColor,
+    ]);
+
+    // Auto-dismiss the tutorial after 8 seconds (its own effect so cleanup is reliable).
+    useEffect(() => {
+        if (!showDropTutorial) return;
+        const t = setTimeout(() => setShowDropTutorial(false), 8000);
+        return () => clearTimeout(t);
+    }, [showDropTutorial]);
+
+    // Dismiss as soon as the local player makes any move AFTER the tutorial appeared.
+    useEffect(() => {
+        if (!showDropTutorial) return;
+        if (tutorialShownAtMoveCountRef.current === null) return;
+        if (gameState.moveHistory.length > tutorialShownAtMoveCountRef.current) {
+            setShowDropTutorial(false);
+        }
+    }, [gameState.moveHistory.length, showDropTutorial]);
+
+    // On game-end, increment the tutorial counter — but only if (1) the game actually
+    // played out (≥2 moves, avoids burning a slot on misclick resigns) and (2) we're
+    // still under the limit (prevents pointless writes once permanently dismissed).
+    useEffect(() => {
+        if (!gameState.isGameOver) return;
+        if (tutorialIncrementedRef.current) return;
+        if (gameState.moveHistory.length < 2) return;
+        tutorialIncrementedRef.current = true;
+        setShowDropTutorial(false);
+        AsyncStorage.getItem(DROP_TUTORIAL_KEY).then((raw) => {
+            const seen = raw ? parseInt(raw, 10) : 0;
+            const safe = Number.isFinite(seen) ? seen : 0;
+            if (safe >= DROP_TUTORIAL_LIMIT) return;
+            AsyncStorage.setItem(DROP_TUTORIAL_KEY, String(safe + 1)).catch((e) =>
+                console.warn("Failed to persist drop tutorial counter:", e),
+            );
+        });
+    }, [gameState.isGameOver, gameState.moveHistory.length]);
+
+    // Detect opponent drops via the last entry in moveHistory. Immediately after a move,
+    // gameState.turn is the OPPONENT of the actor — so when a drop just happened AND the
+    // turn is now back to localColor, the opponent is the one who dropped.
+    useEffect(() => {
+        const last =
+            gameState.moveHistory.length > 0
+                ? gameState.moveHistory[gameState.moveHistory.length - 1]
+                : null;
+        if (!last || last.type !== "drop") return;
+        if (gameState.turn !== localColor) return; // not opponent's drop
+        setDropToast({ row: last.to.row, col: last.to.col });
+        const t = setTimeout(() => setDropToast(null), 1500);
+        return () => clearTimeout(t);
+    }, [gameState.moveHistory.length, gameState.turn, localColor]);
 
     // When a square or piece is selected, figure out what actions are legal
     const legalActions = useMemo(
@@ -248,6 +352,7 @@ export const ChessBoard: React.FC<ChessBoardProps> = ({
         color: PlayerColor,
         children: React.ReactNode,
         name: string,
+        avatarUrl?: string | null,
     ) => {
         const isActive =
             gameState.turn === color &&
@@ -261,11 +366,17 @@ export const ChessBoard: React.FC<ChessBoardProps> = ({
                 ]}
             >
                 <View style={styles.playerHeader}>
-                    <Text
-                        style={[styles.playerName, isActive && styles.activePlayerText]}
-                    >
-                        {name}
-                    </Text>
+                    <View style={styles.playerNameRow}>
+                        {avatarUrl ? (
+                            <Image source={{ uri: avatarUrl }} style={styles.playerAvatar} />
+                        ) : null}
+                        <Text
+                            style={[styles.playerName, isActive && styles.activePlayerText]}
+                            numberOfLines={1}
+                        >
+                            {name}
+                        </Text>
+                    </View>
                     <View style={[styles.timerPill, { opacity: isActive ? 1 : 0 }]}>
                         <Text
                             style={[
@@ -300,6 +411,7 @@ export const ChessBoard: React.FC<ChessBoardProps> = ({
                     size={40}
                 />,
                 opponentName || "Opponent",
+                opponentAvatarUrl,
             )}
 
             {/* The 2.5D Board Container */}
@@ -309,6 +421,35 @@ export const ChessBoard: React.FC<ChessBoardProps> = ({
                 </View>
 
                 <View style={styles.boardGridOverlay}>{renderSquares()}</View>
+
+                {dropToast && (() => {
+                    const visualRow = isRotated ? 5 - dropToast.row : dropToast.row;
+                    const visualCol = isRotated ? 5 - dropToast.col : dropToast.col;
+                    const sqPx = BOARD_SIZE / 6;
+                    const bubbleHeight = 28;
+                    const tailHeight = 7;
+                    const gap = 4;
+                    const tipWidth = 130;
+                    // For row 0 (visual top), flip the bubble below the square so it
+                    // doesn't render above the board edge into the opponent area.
+                    const showAbove = visualRow > 0;
+                    const top = showAbove
+                        ? visualRow * sqPx - bubbleHeight - tailHeight - gap
+                        : (visualRow + 1) * sqPx + tailHeight + gap;
+                    const left = visualCol * sqPx + sqPx / 2 - tipWidth / 2;
+                    return (
+                        <View
+                            pointerEvents="none"
+                            style={[styles.dropToastContainer, { top, left, width: tipWidth }]}
+                        >
+                            {!showAbove && <View style={styles.dropToastTailUp} />}
+                            <View style={styles.dropToastBubble}>
+                                <Text style={styles.dropToastText}>Dropped from hand</Text>
+                            </View>
+                            {showAbove && <View style={styles.dropToastTailDown} />}
+                        </View>
+                    );
+                })()}
 
                 {gameState.pendingPromotion && gameState.turn === localColor && (
                     <View style={styles.promotionModal}>
@@ -334,6 +475,17 @@ export const ChessBoard: React.FC<ChessBoardProps> = ({
                     </View>
                 )}
             </View>
+
+            {showDropTutorial && (
+                <View pointerEvents="none" style={styles.dropTutorialContainer}>
+                    <View style={styles.dropTutorialBubble}>
+                        <Text style={styles.dropTutorialText}>
+                            👇 Tap a captured piece to drop it on the board
+                        </Text>
+                    </View>
+                    <View style={styles.dropTutorialTail} />
+                </View>
+            )}
 
             {/* Local Player Pocket (Bottom) */}
             {renderPlayerContainer(
@@ -411,6 +563,71 @@ const styles = StyleSheet.create({
         zIndex: 2,
         position: "absolute",
     },
+    dropToastContainer: {
+        position: "absolute",
+        zIndex: 30,
+        alignItems: "center",
+    },
+    dropToastBubble: {
+        backgroundColor: "rgba(0, 0, 0, 0.85)",
+        paddingHorizontal: 10,
+        paddingVertical: 5,
+        borderRadius: 8,
+    },
+    dropToastText: {
+        color: "#fff",
+        fontSize: 12,
+        fontWeight: "600",
+        textAlign: "center",
+    },
+    dropToastTailDown: {
+        width: 0,
+        height: 0,
+        borderLeftWidth: 6,
+        borderRightWidth: 6,
+        borderTopWidth: 7,
+        borderLeftColor: "transparent",
+        borderRightColor: "transparent",
+        borderTopColor: "rgba(0, 0, 0, 0.85)",
+    },
+    dropToastTailUp: {
+        width: 0,
+        height: 0,
+        borderLeftWidth: 6,
+        borderRightWidth: 6,
+        borderBottomWidth: 7,
+        borderLeftColor: "transparent",
+        borderRightColor: "transparent",
+        borderBottomColor: "rgba(0, 0, 0, 0.85)",
+    },
+    dropTutorialContainer: {
+        alignItems: "center",
+        marginTop: 6,
+        marginBottom: 2,
+    },
+    dropTutorialBubble: {
+        backgroundColor: "rgba(0, 0, 0, 0.85)",
+        paddingHorizontal: 14,
+        paddingVertical: 8,
+        borderRadius: 14,
+        maxWidth: "90%",
+    },
+    dropTutorialText: {
+        color: "#fff",
+        fontSize: 13,
+        fontWeight: "600",
+        textAlign: "center",
+    },
+    dropTutorialTail: {
+        width: 0,
+        height: 0,
+        borderLeftWidth: 7,
+        borderRightWidth: 7,
+        borderTopWidth: 7,
+        borderLeftColor: "transparent",
+        borderRightColor: "transparent",
+        borderTopColor: "rgba(0, 0, 0, 0.85)",
+    },
     promotionModal: {
         ...StyleSheet.absoluteFillObject,
         backgroundColor: "rgba(0, 0, 0, 0.7)",
@@ -471,11 +688,24 @@ const styles = StyleSheet.create({
         marginTop: 4,
         marginBottom: -4,
     },
+    playerNameRow: {
+        flexDirection: "row",
+        alignItems: "center",
+        flexShrink: 1,
+        gap: 8,
+    },
+    playerAvatar: {
+        width: 22,
+        height: 22,
+        borderRadius: 11,
+        backgroundColor: "#ddd",
+    },
     playerName: {
         color: "#2A343A",
         fontSize: 14,
         fontFamily: "PublicSans_700Bold",
         textTransform: "uppercase",
+        flexShrink: 1,
     },
     activePlayerText: {
         color: "#2A343A",

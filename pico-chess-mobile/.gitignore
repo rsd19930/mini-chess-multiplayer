@@ -47,6 +47,7 @@ build-*.apk
 build-*.aab
 
 google-services.json
+.env
 
 # Test artifacts
 coverage/

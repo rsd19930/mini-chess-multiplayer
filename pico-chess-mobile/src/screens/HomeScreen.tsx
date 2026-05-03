@@ -114,29 +114,32 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ route, navigation }) => 
 
     useEffect(() => {
         const syncPushToken = async () => {
-            if (session?.user?.id) {
-                try {
-                    const token = await registerForPushNotificationsAsync();
-                    if (token && token !== localPushToken) {
-                        await supabase
-                            .from("players")
-                            .update({ expo_push_token: token })
-                            .eq("id", session.user.id);
-                        setLocalPushToken(token);
+            if (!session?.user?.id) return;
+            try {
+                const token = await registerForPushNotificationsAsync();
+                // Stamp IANA timezone so server-side cron can apply per-tz quiet hours / windows.
+                const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+                const updates: Record<string, any> = {};
+                if (token && token !== localPushToken) updates.expo_push_token = token;
+                if (timezone) updates.timezone = timezone;
+
+                if (Object.keys(updates).length > 0) {
+                    const { error } = await supabase
+                        .from("players")
+                        .update(updates)
+                        .eq("id", session.user.id);
+                    if (error) {
+                        console.error("Player profile sync failed:", error);
+                    } else if (updates.expo_push_token) {
+                        // Only mirror the token locally on a successful write — otherwise
+                        // a transient error would suppress retries on next mount.
+                        setLocalPushToken(token!);
                     }
-                    // Stamp IANA timezone so server-side cron can apply per-tz quiet hours / windows.
-                    const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-                    if (timezone) {
-                        await supabase
-                            .from("players")
-                            .update({ timezone })
-                            .eq("id", session.user.id);
-                    }
-                    // User has signed in — cancel the pre-signup local reminder if it was scheduled.
-                    await cancelSignupReminder();
-                } catch (error) {
-                    console.error("Failed to sync push token:", error);
                 }
+                // User has signed in — cancel the pre-signup local reminder if it was scheduled.
+                await cancelSignupReminder();
+            } catch (error) {
+                console.error("Failed to sync push token:", error);
             }
         };
         syncPushToken();

@@ -47,6 +47,8 @@ export const GameScreen: React.FC<GameScreenProps> = ({
     const [matchStatus, setMatchStatus] = useState("active");
     const [isPrivateMatch, setIsPrivateMatch] = useState(false);
     const [opponentId, setOpponentId] = useState<string | null>(null);
+    const [opponentName, setOpponentName] = useState<string | null>(null);
+    const [opponentAvatarUrl, setOpponentAvatarUrl] = useState<string | null>(null);
     const [isRematching, setIsRematching] = useState(false);
     const triggerReviewRef = React.useRef(false);
     const [timeLeft, setTimeLeft] = useState(gameConfig.timers.turnTimeMs / 1000);
@@ -181,6 +183,38 @@ export const GameScreen: React.FC<GameScreenProps> = ({
         localMatchStartTime,
         matchStartedAt,
     ]);
+
+    // Fetch the opponent's username + avatar whenever the opponent ID becomes known.
+    // This is triggered uniformly by: (a) the initial match fetch (joiner flow),
+    // (b) the realtime UPDATE handler when an opponent joins later (creator flow),
+    // and (c) the bot fallback timer. Skips the bot UUID and ignores stale resolves
+    // if opponentId changes again before the fetch returns.
+    React.useEffect(() => {
+        if (!opponentId) {
+            setOpponentName(null);
+            setOpponentAvatarUrl(null);
+            return;
+        }
+        if (opponentId === "00000000-0000-0000-0000-000000000000") {
+            setOpponentName(null);
+            setOpponentAvatarUrl(null);
+            return;
+        }
+        let cancelled = false;
+        supabase
+            .from("players")
+            .select("username, avatar_url")
+            .eq("id", opponentId)
+            .single()
+            .then(({ data: opp, error }) => {
+                if (cancelled || error || !opp) return;
+                if (opp.username) setOpponentName(opp.username);
+                if (opp.avatar_url) setOpponentAvatarUrl(opp.avatar_url);
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [opponentId]);
 
     // Effect to subscribe to the remote Match state
     React.useEffect(() => {
@@ -749,7 +783,13 @@ export const GameScreen: React.FC<GameScreenProps> = ({
                             ? "Opponent"
                             : opponentId === "00000000-0000-0000-0000-000000000000"
                                 ? gameConfig.botParams.name
-                                : "Opponent"
+                                : (opponentName ?? "Opponent")
+                    }
+                    opponentAvatarUrl={
+                        mode === "online" &&
+                        opponentId !== "00000000-0000-0000-0000-000000000000"
+                            ? opponentAvatarUrl
+                            : null
                     }
                 />
 

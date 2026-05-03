@@ -4,6 +4,7 @@ import {
   isActiveWindow,
   isBeforeTodayLocal,
   isInDailyCoinWindow,
+  isInInactiveReminderWindow,
 } from '../helpers';
 
 // Helper to build a UTC date for a specific tz local time.
@@ -125,6 +126,45 @@ describe('cron-reminders helpers', () => {
     it('returns false at 21:30 LA (upper boundary, exclusive)', () => {
       const when = new Date('2026-04-26T04:30:00Z'); // 9:30pm LA
       expect(isInDailyCoinWindow('America/Los_Angeles', when)).toBe(false);
+    });
+  });
+
+  describe('isInInactiveReminderWindow', () => {
+    it('returns true at 13:00 LA local (center of 12:30–13:30 window)', () => {
+      const when = new Date('2026-04-25T20:00:00Z'); // 1pm LA (DST)
+      expect(isInInactiveReminderWindow('America/Los_Angeles', when)).toBe(true);
+    });
+
+    it('returns true at 12:30 LA local (lower boundary, inclusive)', () => {
+      const when = new Date('2026-04-25T19:30:00Z'); // 12:30pm LA
+      expect(isInInactiveReminderWindow('America/Los_Angeles', when)).toBe(true);
+    });
+
+    it('returns false at 13:30 LA local (upper boundary, exclusive)', () => {
+      const when = new Date('2026-04-25T20:30:00Z'); // 1:30pm LA
+      expect(isInInactiveReminderWindow('America/Los_Angeles', when)).toBe(false);
+    });
+
+    it('returns false at 12:00 LA local (just before window)', () => {
+      const when = new Date('2026-04-25T19:00:00Z'); // 12:00pm LA
+      expect(isInInactiveReminderWindow('America/Los_Angeles', when)).toBe(false);
+    });
+
+    it('returns false at 14:00 LA local (well after window)', () => {
+      const when = new Date('2026-04-25T21:00:00Z'); // 2pm LA
+      expect(isInInactiveReminderWindow('America/Los_Angeles', when)).toBe(false);
+    });
+
+    it('correctly evaluates Asia/Kolkata simultaneously', () => {
+      // 2026-04-25T07:30:00Z → 1pm IST (UTC+5:30) → in window
+      const when = new Date('2026-04-25T07:30:00Z');
+      expect(isInInactiveReminderWindow('Asia/Kolkata', when)).toBe(true);
+    });
+
+    it('UTC fallback for users without timezone', () => {
+      // 2026-04-25T13:00:00Z → 1pm UTC → in window
+      const when = new Date('2026-04-25T13:00:00Z');
+      expect(isInInactiveReminderWindow('UTC', when)).toBe(true);
     });
   });
 
